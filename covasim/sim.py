@@ -242,7 +242,7 @@ class Sim(cvb.BaseSim):
                 raise ValueError(errormsg)
 
         # Handle population data
-        popdata_choices = ['random', 'hybrid', 'clustered', 'synthpops']
+        popdata_choices = ['random', 'hybrid', 'clustered', 'matrix', 'synthpops']
         choice = self['pop_type']
         if choice and choice not in popdata_choices: # pragma: no cover
             choicestr = ', '.join(popdata_choices)

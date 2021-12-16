@@ -20,7 +20,6 @@ __all__ = ['make_people', 'make_randpop', 'make_random_contacts',
            'make_microstructured_contacts', 'make_hybrid_contacts',
            'make_synthpop']
 
-
 def make_people(sim, popdict=None, save_pop=False, popfile=None, die=True, reset=False, verbose=None, **kwargs):
     '''
     Make the actual people for the simulation. Usually called via sim.initialize(),
@@ -70,7 +69,7 @@ def make_people(sim, popdict=None, save_pop=False, popfile=None, die=True, reset
         sim.popdict = None # Once loaded, remove
     elif popdict is None: # Main use case: no popdict is supplied
         # Create the population
-        if pop_type in ['random', 'clustered', 'hybrid']:
+        if pop_type in ['random', 'clustered', 'hybrid', 'matrix']:
             popdict = make_randpop(sim, microstructure=pop_type, **kwargs)
         elif pop_type == 'synthpops':
             popdict = make_synthpop(sim, **kwargs)
@@ -78,7 +77,7 @@ def make_people(sim, popdict=None, save_pop=False, popfile=None, die=True, reset
             errormsg = 'You have set pop_type=None. This is fine, but you must ensure sim.popdict exists before calling make_people().'
             raise ValueError(errormsg)
         else: # pragma: no cover
-            errormsg = f'Population type "{pop_type}" not found; choices are random, clustered, hybrid, or synthpops'
+            errormsg = f'Population type "{pop_type}" not found; choices are random, clustered, hybrid, matrix, or synthpops'
             raise ValueError(errormsg)
 
     # Ensure prognoses are set
@@ -170,11 +169,20 @@ def make_randpop(sim, use_age_data=True, use_household_data=True, sex_ratio=0.5,
     popdict['sex'] = sexes
 
     # Actually create the contacts
-    if   microstructure == 'random':    contacts, layer_keys    = make_random_contacts(pop_size, sim['contacts'])
-    elif microstructure == 'clustered': contacts, layer_keys, _ = make_microstructured_contacts(pop_size, sim['contacts'])
-    elif microstructure == 'hybrid':    contacts, layer_keys, _ = make_hybrid_contacts(pop_size, ages, sim['contacts'])
+    if   microstructure == 'random':    
+        contacts, layer_keys    = make_random_contacts(pop_size, sim['contacts'])
+    elif microstructure == 'clustered': 
+        contacts, layer_keys, _ = make_microstructured_contacts(pop_size, sim['contacts'])
+    elif microstructure == 'hybrid':    
+        contacts, layer_keys, _ = make_hybrid_contacts(pop_size, ages, sim['contacts'])
+    elif microstructure == 'matrix':
+        contact_matrix = {}
+        contact_matrix['h'] = np.genfromtxt(sim['home_matrix'], delimiter=' ')
+        contact_matrix['s'] = np.genfromtxt(sim['school_matrix'], delimiter=' ')
+        contact_matrix['w'] = np.genfromtxt(sim['work_matrix'], delimiter=' ')
+        contacts, layer_keys = make_matrix_based_contacts(pop_size, ages, contact_matrix)
     else: # pragma: no cover
-        errormsg = f'Microstructure type "{microstructure}" not found; choices are random, clustered, or hybrid'
+        errormsg = f'Microstructure type "{microstructure}" not found; choices are random, clustered, hybrid or matrix'
         raise NotImplementedError(errormsg)
 
     popdict['contacts']   = contacts
@@ -314,6 +322,46 @@ def make_hybrid_contacts(pop_size, ages, contacts, school_ages=None, work_ages=N
 
     return contacts_list, layer_keys, clusters
 
+
+def make_matrix_based_contacts(pop_size, ages, contacts):
+    pop_size = int(pop_size) # Number of people
+    contacts = sc.dcp(contacts)
+
+    layer_keys = list(contacts.keys())
+    contacts_list = [{c:set() for c in layer_keys} for p in range(pop_size)] # Pre-populate
+
+    age_bin = 5
+    age_range_uids = [[]]*16
+    for uid in range(pop_size):
+        uid_bin = -1 if ages[uid]>=75 else int(ages[uid]//age_bin)
+        age_range_uids[uid_bin].append(uid)
+
+    for layer_name, matrix in contacts.items():
+        age_bin = matrix.shape[0]
+        for p in range(pop_size):
+            pos = -1 if ages[p] > 75 else int(ages[p]//age_bin)
+            age_contact = [cvu.poisson(mean_contact) for mean_contact in matrix[pos]]
+            for idx, c in enumerate(age_contact):
+                c = c - len(contacts_list[p][layer_name])
+                if c <= 0:
+                    continue
+                uid_indices = cvu.choose_r(max_n=len(age_range_uids[idx]), n=c)
+                for j in uid_indices:
+                    uid = age_range_uids[idx][j]
+                    contacts_list[p][layer_name].add(uid)
+                    contacts_list[uid][layer_name].add(p)
+
+    for p in range(pop_size):
+        for c in layer_keys:
+            contacts_list[p][c] = list(contacts_list[p][c])
+
+    if 'c' not in layer_keys:
+        layer_keys.append('c')
+        c_contacts, _ = make_random_contacts(pop_size, {'c': 20})
+        for i in range(pop_size):
+            contacts_list[i]['c'] = c_contacts[i]['c']
+
+    return contacts_list, layer_keys
 
 
 def make_synthpop(sim=None, population=None, layer_mapping=None, community_contacts=None, **kwargs):

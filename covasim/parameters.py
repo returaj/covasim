@@ -55,6 +55,11 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     pars['dynam_layer']     = None  # Which layers are dynamic; set by reset_layer_pars() below
     pars['beta_layer']      = None  # Transmissibility per layer; set by reset_layer_pars() below
 
+    # Contact Matrix
+    pars['home_matrix'] = None
+    pars['school_matrix'] = None
+    pars['work_matrix'] = None
+
     # Basic disease transmission parameters
     pars['beta_dist']       = dict(dist='neg_binomial', par1=1.0, par2=0.45, step=0.01) # Distribution to draw individual level transmissibility; dispersion from https://www.researchsquare.com/article/rs-29548/v1
     pars['viral_dist']      = dict(frac_time=0.3, load_ratio=2, high_cap=4) # The time varying viral load (transmissibility); estimated from Lescure 2020, Lancet, https://doi.org/10.1016/S1473-3099(20)30200-0
@@ -193,6 +198,7 @@ def reset_layer_pars(pars, layer_keys=None, force=False):
                   quar_factor=0.3
     )
     layer_defaults['synthpops'] = sc.dcp(layer_defaults['hybrid'])
+    layer_defaults['matrix'] = sc.dcp(layer_defaults['hybrid'])
     for key,val in l_pars.items():
         layer_defaults['synthpops'][key]['l'] = val
 
