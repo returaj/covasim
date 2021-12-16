@@ -14,14 +14,10 @@ from . import interventions as cvi
 from . import settings as cvset
 from . import plotting as cvpl
 from . import run as cvr
-try:
-    import optuna as op
-except ImportError as E: # pragma: no cover
-    errormsg = f'Optuna import failed ({str(E)}), please install first (pip install optuna)'
-    op = ImportError(errormsg)
 
 
-__all__ = ['Analyzer', 'snapshot', 'age_histogram', 'daily_age_stats', 'daily_stats', 'Fit', 'Calibration', 'TransTree']
+__all__ = ['Analyzer', 'snapshot', 'age_histogram', 'daily_age_stats', 'daily_stats', 'nab_histogram',
+           'Fit', 'Calibration', 'TransTree']
 
 
 class Analyzer(sc.prettyobj):
@@ -45,12 +41,14 @@ class Analyzer(sc.prettyobj):
         self.finalized = False
         return
 
+
     def __call__(self, *args, **kwargs):
         # Makes Analyzer(sim) equivalent to Analyzer.apply(sim)
         if not self.initialized:
             errormsg = f'Analyzer (label={self.label}, {type(self)}) has not been initialized'
             raise RuntimeError(errormsg)
         return self.apply(*args, **kwargs)
+
 
     def initialize(self, sim=None):
         '''
@@ -84,6 +82,19 @@ class Analyzer(sc.prettyobj):
             sim: the Sim instance
         '''
         raise NotImplementedError
+
+
+    def shrink(self, in_place=False):
+        '''
+        Remove any excess stored data from the intervention; for use with sim.shrink().
+
+        Args:
+            in_place (bool): whether to shrink the intervention (else shrink a copy)
+        '''
+        if in_place:
+            return self
+        else:
+            return sc.dcp(self)
 
 
     def to_json(self):
@@ -885,6 +896,87 @@ class daily_stats(Analyzer):
         return fig
 
 
+class nab_histogram(Analyzer):
+    '''
+    Store histogram of log_{10}(NAb) distribution
+
+    Args:
+        days (list): days on which calculate the NAb histogram (if None, assume last day)
+        edges (list): log10 bin edges for histogram
+
+    **Example**::
+
+        sim = cv.Sim(analyzers=cv.nab_histogram())
+        sim.run()
+        sim.get_analyzer().plot()
+
+    New in version 3.1.0.
+    '''
+    def __init__(self, days=None, edges=None, **kwargs):
+        super().__init__(**kwargs)  # Initialize the Analyzer object
+        self.days = days  # To be converted to integer representations
+        self.edges = edges  # Edges of age bins in log10
+        self.hists = sc.odict()  # Store the actual snapshots
+
+
+    def initialize(self, sim):
+
+        # Check that the simulation parameters are correct
+        if not sim['use_waning']:
+            errormsg = 'The cv.nab_histogram() analyzer requires use_waning=True. Please enable waning.'
+            raise RuntimeError(errormsg)
+
+        super().initialize()
+
+        # Handle days
+        self.start_day = sc.date(sim['start_day'], as_date=False)  # Get the start day, as a string
+        self.end_day = sc.date(sim['end_day'], as_date=False)  # Get the start day, as a string
+        if self.days is None:
+            self.days = self.end_day  # If no day is supplied, use the last day
+        self.days, self.dates = cvi.process_days(sim, self.days,
+                                                 return_dates=True)  # Ensure days are in the right format
+
+        # Handle edges and nab bins
+        if self.edges is None:  # Default  bins
+            self.edges = np.arange(-4, 3)
+        self.bins = self.edges[:-1]  # Don't include the last edge in the bins
+
+        return
+
+
+    def apply(self, sim):
+        nonzero = sim.people.nab > 0
+        log_nabs = np.log10(sim.people.nab[nonzero])
+        for ind in cvi.find_day(self.days, sim.t):
+            date = self.dates[ind]  # Find the date for this index
+            self.hists[date] = sc.objdict()  # Initialize the dictionary
+            scale = sim.rescale_vec[sim.t]  # Determine current scale factor
+            self.hists[date]['bins'] = self.bins  # Copy here for convenience
+            self.hists[date]['n'] = np.histogram(log_nabs, bins=self.edges)[0] * scale  # Actually count the people
+            self.hists[date]['s'] = np.std(log_nabs)    # keep the std
+            self.hists[date]['m'] = np.mean(log_nabs)   # keep the mean
+
+
+    def plot(self, fig_args=None, axis_args=None, plot_args=None, do_show=None):
+        '''
+        Plot the results
+        '''
+
+        fig_args  = sc.mergedicts(dict(figsize=(9,5)), fig_args)
+        axis_args = sc.mergedicts(dict(left=0.10, right=0.95, bottom=0.10, top=0.95, wspace=0.25, hspace=0.4), axis_args)
+        plot_args = sc.mergedicts(dict(lw=2), plot_args)
+
+        fig, axs = pl.subplots(nrows=1, ncols=1, **fig_args)
+        pl.subplots_adjust(**axis_args)
+        for date, hist in self.hists.items():
+            axs.stairs(hist['n'], edges=self.edges, label=date, **plot_args)
+        axs.set_xlabel('Log10(NAb)')
+        axs.set_ylabel('Count')
+        axs.legend()
+        cvset.handle_show(do_show) # Whether or not to call pl.show()
+
+        return fig
+
 
 class Fit(Analyzer):
     '''
@@ -906,6 +998,7 @@ class Fit(Analyzer):
         compute (bool): whether to compute the mismatch immediately
         verbose (bool): detail to print
         die (bool): whether to raise an exception if no data are supplied
+        label (str): the label for the analyzer
         kwargs (dict): passed to cv.compute_gof() -- see this function for more detail on goodness-of-fit calculation options
 
     **Example**::
@@ -916,8 +1009,8 @@ class Fit(Analyzer):
         fit.plot()
     '''
 
-    def __init__(self, sim, weights=None, keys=None, custom=None, compute=True, verbose=False, die=True, **kwargs):
-        super().__init__(**kwargs) # Initialize the Analyzer object
+    def __init__(self, sim, weights=None, keys=None, custom=None, compute=True, verbose=False, die=True, label=None, **kwargs):
+        super().__init__(label=label) # Initialize the Analyzer object
 
         # Handle inputs
         self.weights    = weights
@@ -1235,7 +1328,14 @@ class Fit(Analyzer):
 
         return fig
 
-
+def import_optuna():
+    ''' A helper function to import Optuna, which is an optional dependency '''
+    try:
+        import optuna as op # Import here since it's slow
+    except ModuleNotFoundError as E: # pragma: no cover
+        errormsg = f'Optuna import failed ({str(E)}), please install first (pip install optuna)'
+        raise ModuleNotFoundError(errormsg)
+    return op
 
 class Calibration(Analyzer):
     '''
@@ -1259,8 +1359,10 @@ class Calibration(Analyzer):
         total_trials (int)  : if n_trials is not supplied, calculate by dividing this number by n_workers)
         name         (str)  : the name of the database (default: 'covasim_calibration')
         db_name      (str)  : the name of the database file (default: 'covasim_calibration.db')
+        keep_db      (bool) : whether to keep the database after calibration (default: false)
         storage      (str)  : the location of the database (default: sqlite)
         label        (str)  : a label for this calibration object
+        die          (bool) : whether to stop if an exception is encountered (default: false)
         verbose      (bool) : whether to print details of the calibration
         kwargs       (dict) : passed to cv.Calibration()
 
@@ -1278,19 +1380,22 @@ class Calibration(Analyzer):
     New in version 3.0.3.
     '''
 
-    def __init__(self, sim, calib_pars=None, fit_args=None, custom_fn=None, par_samplers=None, n_trials=None, n_workers=None, total_trials=None, name=None, db_name=None, storage=None, label=None, verbose=True):
+    def __init__(self, sim, calib_pars=None, fit_args=None, custom_fn=None, par_samplers=None,
+                 n_trials=None, n_workers=None, total_trials=None, name=None, db_name=None,
+                 keep_db=None, storage=None, label=None, die=False, verbose=True):
         super().__init__(label=label) # Initialize the Analyzer object
-        if isinstance(op, Exception): raise op # If Optuna failed to import, raise that exception now
-        import multiprocessing as mp
+
+        import multiprocessing as mp # Import here since it's also slow
 
         # Handle run arguments
         if n_trials  is None: n_trials  = 20
         if n_workers is None: n_workers = mp.cpu_count()
         if name      is None: name      = 'covasim_calibration'
         if db_name   is None: db_name   = f'{name}.db'
+        if keep_db   is None: keep_db   = False
         if storage   is None: storage   = f'sqlite:///{db_name}'
         if total_trials is not None: n_trials = total_trials/n_workers
-        self.run_args   = sc.objdict(n_trials=int(n_trials), n_workers=int(n_workers), name=name, db_name=db_name, storage=storage)
+        self.run_args   = sc.objdict(n_trials=int(n_trials), n_workers=int(n_workers), name=name, db_name=db_name, keep_db=keep_db, storage=storage)
 
         # Handle other inputs
         self.sim          = sim
@@ -1298,6 +1403,7 @@ class Calibration(Analyzer):
         self.fit_args     = sc.mergedicts(fit_args)
         self.par_samplers = sc.mergedicts(par_samplers)
         self.custom_fn    = custom_fn
+        self.die          = die
         self.verbose      = verbose
         self.calibrated   = False
 
@@ -1323,12 +1429,20 @@ class Calibration(Analyzer):
                 extra = set(calib_pars.keys()) - set(valid_pars.keys())
                 errormsg = f'The following parameters are not part of the sim, nor is a custom function specified to use them: {sc.strjoin(extra)}'
                 raise ValueError(errormsg)
-        sim.run()
-        sim.compute_fit(**self.fit_args)
-        if return_sim:
-            return sim
-        else:
-            return sim.fit.mismatch
+        try:
+            sim.run()
+            sim.compute_fit(**self.fit_args)
+            if return_sim:
+                return sim
+            else:
+                return sim.fit.mismatch
+        except Exception as E:
+            if self.die:
+                raise E
+            else:
+                print(f'Warning, encountered error running sim!\nParameters:\n{valid_pars}\nTraceback:\n{sc.traceback()}')
+                output = None if return_sim else np.inf
+                return output
 
 
     def run_trial(self, trial):
@@ -1350,6 +1464,7 @@ class Calibration(Analyzer):
 
     def worker(self):
         ''' Run a single worker '''
+        op = import_optuna()
         if self.verbose:
             op.logging.set_verbosity(op.logging.DEBUG)
         else:
@@ -1361,15 +1476,31 @@ class Calibration(Analyzer):
 
     def run_workers(self):
         ''' Run multiple workers in parallel '''
-        output = sc.parallelize(self.worker, iterarg=self.run_args.n_workers)
+        if self.run_args.n_workers > 1: # Normal use case: run in parallel
+            output = sc.parallelize(self.worker, iterarg=self.run_args.n_workers)
+        else: # Special case: just run one
+            output = [self.worker()]
         return output
+
+
+    def remove_db(self):
+        '''
+        Remove the database file if keep_db is false and the path exists.
+
+        New in version 3.1.0.
+        '''
+        if os.path.exists(self.run_args.db_name):
+            os.remove(self.run_args.db_name)
+            if self.verbose:
+                print(f'Removed existing calibration {self.run_args.db_name}')
+        return
 
 
     def make_study(self):
         ''' Make a study, deleting one if it already exists '''
-        if os.path.exists(self.run_args.db_name):
-            os.remove(self.run_args.db_name)
-            print(f'Removed existing calibration {self.run_args.db_name}')
+        op = import_optuna()
+        if not self.run_args.keep_db:
+            self.remove_db()
         output = op.create_study(storage=self.run_args.storage, study_name=self.run_args.name)
         return output
 
@@ -1383,6 +1514,7 @@ class Calibration(Analyzer):
             verbose (bool): whether to print output from each trial
             kwargs (dict): if supplied, overwrite stored run_args (n_trials, n_workers, etc.)
         '''
+        op = import_optuna()
 
         # Load and validate calibration parameters
         if calib_pars is not None:
@@ -1402,18 +1534,23 @@ class Calibration(Analyzer):
 
         # Compare the results
         self.initial_pars = sc.objdict({k:v[0] for k,v in self.calib_pars.items()})
+        self.par_bounds   = sc.objdict({k:np.array([v[1], v[2]]) for k,v in self.calib_pars.items()})
         self.before = self.run_sim(calib_pars=self.initial_pars, label='Before calibration', return_sim=True)
         self.after  = self.run_sim(calib_pars=self.best_pars,    label='After calibration',  return_sim=True)
+        self.parse_study()
 
         # Tidy up
         self.calibrated = True
+        if not self.run_args.keep_db:
+            self.remove_db()
         if verbose:
             self.summarize()
 
-        return
+        return self
 
 
     def summarize(self):
+        ''' Print out results from the calibration '''
         if self.calibrated:
             print(f'Calibration for {self.run_args.n_workers*self.run_args.n_trials} total trials completed in {self.elapsed:0.1f} s.')
             before = self.before.fit.mismatch
@@ -1431,10 +1568,174 @@ class Calibration(Analyzer):
             return
 
 
-    def plot(self, **kwargs):
+    def parse_study(self):
+        '''Parse the study into a data frame -- called automatically '''
+        best = self.best_pars
+
+        print('Making results structure...')
+        results = []
+        n_trials = len(self.study.trials)
+        failed_trials = []
+        for trial in self.study.trials:
+            data = {'index':trial.number, 'mismatch': trial.value}
+            for key,val in trial.params.items():
+                data[key] = val
+            if data['mismatch'] is None:
+                failed_trials.append(data['index'])
+            else:
+                results.append(data)
+        print(f'Processed {n_trials} trials; {len(failed_trials)} failed')
+
+        keys = ['index', 'mismatch'] + list(best.keys())
+        data = sc.objdict().make(keys=keys, vals=[])
+        for i,r in enumerate(results):
+            for key in keys:
+                if key not in r:
+                    print(f'Warning! Key {key} is missing from trial {i}, replacing with default')
+                    r[key] = best[key]
+                data[key].append(r[key])
+        self.data = data
+        self.df = pd.DataFrame.from_dict(data)
+
+        return
+
+
+    def to_json(self, filename=None):
+        '''
+        Convert the data to JSON.
+
+        New in version 3.1.1.
+        '''
+        order = np.argsort(self.df['mismatch'])
+        json = []
+        for o in order:
+            row = self.df.iloc[o,:].to_dict()
+            rowdict = dict(index=row.pop('index'), mismatch=row.pop('mismatch'), pars={})
+            for key,val in row.items():
+                rowdict['pars'][key] = val
+            json.append(rowdict)
+        if filename:
+            sc.savejson(filename, json, indent=2)
+        else:
+            return json
+
+
+    def plot_sims(self, **kwargs):
+        '''
+        Plot sims, before and after calibration.
+
+        New in version 3.1.1: renamed from plot() to plot_sims().
+        '''
         msim = cvr.MultiSim([self.before, self.after])
         fig = msim.plot(**kwargs)
         return fig
+
+
+    def plot_trend(self, best_thresh=2):
+        '''
+        Plot the trend in best mismatch over time.
+
+        New in version 3.1.1.
+        '''
+        mismatch = sc.dcp(self.df['mismatch'].values)
+        best_mismatch = np.zeros(len(mismatch))
+        for i in range(len(mismatch)):
+            best_mismatch[i] = mismatch[:i+1].min()
+        smoothed_mismatch = sc.smooth(mismatch)
+        fig = pl.figure(figsize=(16,12), dpi=120)
+
+        ax1 = pl.subplot(2,1,1)
+        pl.plot(mismatch, alpha=0.2, label='Original')
+        pl.plot(smoothed_mismatch, lw=3, label='Smoothed')
+        pl.plot(best_mismatch, lw=3, label='Best')
+
+        ax2 = pl.subplot(2,1,2)
+        max_mismatch = mismatch.min()*best_thresh
+        inds = sc.findinds(mismatch<=max_mismatch)
+        pl.plot(best_mismatch, lw=3, label='Best')
+        pl.scatter(inds, mismatch[inds], c=mismatch[inds], label='Usable indices')
+        for ax in [ax1, ax2]:
+            pl.sca(ax)
+            pl.grid(True)
+            pl.legend()
+            sc.setylim()
+            sc.setxlim()
+            pl.xlabel('Trial number')
+            pl.ylabel('Mismatch')
+        return fig
+
+
+    def plot_all(self): # pragma: no cover
+        '''
+        Plot every point in the calibration. Warning, very slow for more than a few hundred trials.
+
+        New in version 3.1.1.
+        '''
+        g = pairplotpars(self.data, color_column='mismatch', bounds=self.par_bounds)
+        return g
+
+
+    def plot_best(self, best_thresh=2): # pragma: no cover
+        ''' Plot only the points with lowest mismatch. New in version 3.1.1. '''
+        max_mismatch = self.df['mismatch'].min()*best_thresh
+        inds = sc.findinds(self.df['mismatch'].values <= max_mismatch)
+        g = pairplotpars(self.data, inds=inds, color_column='mismatch', bounds=self.par_bounds)
+        return g
+
+
+    def plot_stride(self, npts=200): # pragma: no cover
+        '''
+        Plot a fixed number of points in order across the results.
+
+        New in version 3.1.1.
+        '''
+        npts = min(len(self.df), npts)
+        inds = np.linspace(0, len(self.df)-1, npts).round()
+        g = pairplotpars(self.data, inds=inds, color_column='mismatch', bounds=self.par_bounds)
+        return g
+
+
+def pairplotpars(data, inds=None, color_column=None, bounds=None, cmap='parula', bins=None, edgecolor='w', facecolor='#F8A493', figsize=(20,16)): # pragma: no cover
+    ''' Plot scatterplots, histograms, and kernel densities for calibration results '''
+    try:
+        import seaborn as sns # Optional import
+    except ModuleNotFoundError as E:
+        errormsg = 'Calibration plotting requires Seaborn; please install with "pip install seaborn"'
+        raise ModuleNotFoundError(errormsg) from E
+
+    data = sc.odict(sc.dcp(data))
+
+    # Create the dataframe
+    df = pd.DataFrame.from_dict(data)
+    if inds is not None:
+        df = df.iloc[inds,:].copy()
+
+    # Choose the colors
+    if color_column:
+        colors = sc.vectocolor(df[color_column].values, cmap=cmap)
+    else:
+        colors = [facecolor for i in range(len(df))]
+    df['color_column'] = [sc.rgb2hex(rgba[:-1]) for rgba in colors]
+
+    # Make the plot
+    grid = sns.PairGrid(df)
+    grid = grid.map_lower(pl.scatter, **{'facecolors':df['color_column']})
+    grid = grid.map_diag(pl.hist, bins=bins, edgecolor=edgecolor, facecolor=facecolor)
+    grid = grid.map_upper(sns.kdeplot)
+    grid.fig.set_size_inches(figsize)
+    grid.fig.tight_layout()
+
+    # Set bounds
+    if bounds:
+        for ax in grid.axes.flatten():
+            xlabel = ax.get_xlabel()
+            ylabel = ax.get_ylabel()
+            if xlabel in bounds:
+                ax.set_xlim(bounds[xlabel])
+            if ylabel in bounds:
+                ax.set_ylim(bounds[ylabel])
+
+    return grid
 
 
 
@@ -1526,7 +1827,8 @@ class TransTree(Analyzer):
 
             # Next, add edges from linelist
             for edge in people.infection_log:
-                self.graph.add_edge(edge['source'],edge['target'],date=edge['date'],layer=edge['layer'])
+                if edge['source'] is not None: # Skip seed infections
+                    self.graph.add_edge(edge['source'],edge['target'],date=edge['date'],layer=edge['layer'])
 
         return
 
