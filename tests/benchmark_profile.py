@@ -18,6 +18,7 @@ func_options = {
     'initialize':    sim.initialize,
     'run':           sim.run,
     'step':          sim.step,
+    'infect':        cv.People.infect,
 }
 
 sc.profile(run=sim.run, follow=func_options[to_profile])

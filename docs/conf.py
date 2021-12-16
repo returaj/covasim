@@ -18,6 +18,7 @@ import sphinx_rtd_theme
 from datetime import datetime
 import covasim as cv
 
+os.environ['SPHINX_BUILD'] = 'True' # This is used so cv.options.set('jupyter') doesn't reset the Matplotlib renderer
 on_rtd = os.environ.get('READTHEDOCS') == 'True'
 
 if sys.platform in ["linux", "darwin"]:
@@ -137,10 +138,7 @@ html_static_path = ['_static']
 
 html_context = {
     'rtd_url': 'https://docs.idmod.org/projects/covasim/en/latest',
-    'theme_vcs_pageview_mode': 'edit',
-    'css_files': [
-        '_static/theme_overrides.css'
-    ]
+    'theme_vcs_pageview_mode': 'edit'
 }
 # Add any extra paths that contain custom files (such as robots.txt or
 # .htaccess) here, relative to this directory. These files are copied

@@ -16,7 +16,7 @@ from .settings import options as cvo
 
 
 # Specify all externally visible functions this file defines
-__all__ = ['make_metapars', 'MultiSim', 'Scenarios', 'single_run', 'multi_run']
+__all__ = ['make_metapars', 'MultiSim', 'Scenarios', 'single_run', 'multi_run', 'parallel']
 
 
 
@@ -978,15 +978,13 @@ class Scenarios(cvb.ParsObj):
             # Create and run the simulations
             print_heading(f'Multirun for {scenkey}')
             scen_sim = sc.dcp(self.base_sim)
-            scen_sim.label = scenkey
+            scen_sim.scenkey = scenkey
+            scen_sim.label = scenname
+            scen_sim.scen = scen
 
-            scen_sim.update_pars(scenpars)  # Update the parameters, if provided
-            scen_sim.validate_pars()
-            if 'variants' in scenpars: # Process variants
-                scen_sim.init_variants()
-                scen_sim.init_immunity(create=True)
-            elif 'imm_pars' in scenpars: # Process immunity
-                scen_sim.init_immunity(create=True) # TODO: refactor
+            # Update the parameters, if provided, and re-initialize aspects of the simulation
+            scen_sim.update_pars(scenpars)
+            scen_sim.initialized = False # Ensure it gets re-initialized
 
             run_args = dict(n_runs=self['n_runs'], noise=self['noise'], noisepar=self['noisepar'], keep_people=keep_people, verbose=verbose)
             if debug:
@@ -1496,3 +1494,28 @@ Alternatively, to run without multiprocessing, set parallel=False.
             sims.append(sim)
 
     return sims
+
+
+def parallel(*args, **kwargs):
+    '''
+    A shortcut to ``cv.MultiSim()``, allowing the quick running of multiple simulations
+    at once.
+
+    Args:
+        args (list): The simulations to run
+        kwargs (dict): passed to multi_run()
+
+    Returns:
+        A run MultiSim object.
+
+    **Examples**::
+
+        s1 = cv.Sim(beta=0.01, label='Low')
+        s2 = cv.Sim(beta=0.02, label='High')
+        cv.parallel(s1, s2).plot()
+        msim = cv.parallel([s1, s2], keep_people=True)
+
+    New in version 3.1.1.
+    '''
+    sims = sc.mergelists(*args)
+    return MultiSim(sims=sims).run(**kwargs)
