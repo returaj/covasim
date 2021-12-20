@@ -69,7 +69,7 @@ def make_people(sim, popdict=None, save_pop=False, popfile=None, die=True, reset
         sim.popdict = None # Once loaded, remove
     elif popdict is None: # Main use case: no popdict is supplied
         # Create the population
-        if pop_type in ['random', 'clustered', 'hybrid', 'matrix']:
+        if pop_type in ['random', 'hybrid', 'matrix']:
             popdict = make_randpop(sim, microstructure=pop_type, **kwargs)
         elif pop_type == 'synthpops':
             popdict = make_synthpop(sim, **kwargs)
@@ -77,7 +77,7 @@ def make_people(sim, popdict=None, save_pop=False, popfile=None, die=True, reset
             errormsg = 'You have set pop_type=None. This is fine, but you must ensure sim.popdict exists before calling make_people().'
             raise ValueError(errormsg)
         else: # pragma: no cover
-            errormsg = f'Population type "{pop_type}" not found; choices are random, clustered, hybrid, matrix, or synthpops'
+            errormsg = f'Population type "{pop_type}" not found; choices are random, hybrid, matrix, or synthpops'
             raise ValueError(errormsg)
 
     # Ensure prognoses are set
@@ -178,10 +178,10 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
         contacts = make_hybrid_contacts(pop_size, ages, pars['contacts'], **kwargs)
     elif microstructure == 'matrix':
         contact_matrix = {}
-        contact_matrix['h'] = np.genfromtxt(sim['home_matrix'], delimiter=' ')
-        contact_matrix['s'] = np.genfromtxt(sim['school_matrix'], delimiter=' ')
-        contact_matrix['w'] = np.genfromtxt(sim['work_matrix'], delimiter=' ')
-        contacts, layer_keys = make_matrix_based_contacts(pop_size, ages, contact_matrix)
+        contact_matrix['h'] = np.genfromtxt(pars['home_matrix'], delimiter=' ')
+        contact_matrix['s'] = np.genfromtxt(pars['school_matrix'], delimiter=' ')
+        contact_matrix['w'] = np.genfromtxt(pars['work_matrix'], delimiter=' ')
+        contacts = make_matrix_based_contacts(pop_size, ages, contact_matrix)
     else: # pragma: no cover
         errormsg = f'Microstructure type "{microstructure}" not found; choices are random, hybrid or matrix'
         raise NotImplementedError(errormsg)
@@ -329,33 +329,35 @@ def make_hybrid_contacts(pop_size, ages, contacts, school_ages=None, work_ages=N
 
     return contacts_dict
 
-def make_matrix_based_contacts(pop_size, ages, contacts):
+def make_matrix_based_contacts(pop_size, ages, contact_matrix):
     pop_size = int(pop_size) # Number of people
-    contacts = sc.dcp(contacts)
+    contact_matrix = sc.dcp(contact_matrix)
 
-    layer_keys = list(contacts.keys())
-    contacts_list = [{c:set() for c in layer_keys} for p in range(pop_size)] # Pre-populate
-
-    age_bin = 5
-    age_range_uids = [[]]*16
+    bin_size, n_bins = 5, 16
+    age_based_uids = [[]]*n_bins
     for uid in range(pop_size):
-        uid_bin = -1 if ages[uid]>=75 else int(ages[uid]//age_bin)
-        age_range_uids[uid_bin].append(uid)
+        age_idx = -1 if ages[uid]>=75 else int(ages[uid]/bin_size)
+        age_based_uids[age_idx].append(uid)
+    # shuffle elements in each age bin
+    for elems in age_based_uids:
+        np.random.shuffle(elems)
 
-    for layer_name, matrix in contacts.items():
-        age_bin = matrix.shape[0]
-        for p in range(pop_size):
-            pos = -1 if ages[p] > 75 else int(ages[p]//age_bin)
-            age_contact = [cvu.poisson(mean_contact) for mean_contact in matrix[pos]]
-            for idx, c in enumerate(age_contact):
-                c = c - len(contacts_list[p][layer_name])
-                if c <= 0:
-                    continue
-                uid_indices = cvu.choose_r(max_n=len(age_range_uids[idx]), n=c)
-                for j in uid_indices:
-                    uid = age_range_uids[idx][j]
-                    contacts_list[p][layer_name].add(uid)
-                    contacts_list[uid][layer_name].add(p)
+    contacts = dict()
+
+    # household contacts
+    hm = contact_matrix['h']
+    uids = np.argsort(ages)  # uids sorted based on age
+    used_uids = set()
+    used_pos = [[0]] * n_bins
+    for p in uids:
+        if p in used_uids:
+            continue
+        used_uids.add(p)
+
+        idx = -1 if ages[p] >= 75 else int(ages[p]/bin_size)
+        cnt_contacts = [cvu.poisson(c) for c in hm[idx]]
+        for idx, cnt in enumerate(cnt_contacts):
+
 
     for p in range(pop_size):
         for c in layer_keys:
