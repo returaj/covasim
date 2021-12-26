@@ -56,9 +56,19 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     pars['beta_layer']      = None  # Transmissibility per layer; set by reset_layer_pars() below
 
     # Contact Matrix
-    pars['home_matrix'] = None
-    pars['school_matrix'] = None
-    pars['work_matrix'] = None
+    pars['home_matrix']      = None
+    pars['school_matrix']    = None
+    pars['work_matrix']      = None
+    pars['community_matrix'] = None
+
+    # bing tiles
+    pars['tiles'] = None
+
+    # mobility matrix
+    pars['mobility'] = None
+
+    # population density
+    pars['pop_density'] = None
 
     # Basic disease transmission parameters
     pars['beta_dist']    = dict(dist='neg_binomial', par1=1.0, par2=0.45, step=0.01) # Distribution to draw individual level transmissibility; dispersion from https://www.researchsquare.com/article/rs-29548/v1

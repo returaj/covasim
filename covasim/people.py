@@ -104,6 +104,18 @@ class People(cvb.BasePeople):
         if 'contacts' in kwargs:
             self.add_contacts(kwargs.pop('contacts'))
 
+        # tile_uids: for matrix based microstructure
+        if 'tile_uids' in kwargs:
+            tile_uids = kwargs.pop('tile_uids')
+            if tile_uids:
+                self.tile_uids = tile_uids
+
+        # cmatrix: for matrix based microstructure
+        if 'cmatrix' in kwargs:
+            cmatrix = kwargs.pop('cmatrix')
+            if cmatrix is not None:
+                self.cmatrix = cmatrix
+
         # Handle all other values, e.g. age
         for key,value in kwargs.items():
             if strict:
@@ -197,12 +209,12 @@ class People(cvb.BasePeople):
         return
 
 
-    def update_contacts(self):
+    def update_contacts(self, date=None):
         ''' Refresh dynamic contacts, e.g. community '''
         # Figure out if anything needs to be done -- e.g. {'h':False, 'c':True}
         for lkey, is_dynam in self.pars['dynam_layer'].items():
             if is_dynam:
-                self.contacts[lkey].update(self)
+                self.contacts[lkey].update(self, date)
 
         return self.contacts
 

@@ -13,6 +13,7 @@ from . import data as cvdata
 from . import defaults as cvd
 from . import parameters as cvpar
 from . import people as cvppl
+from . import syn_matrix as cvs
 
 
 # Specify all externally visible functions this file defines
@@ -85,7 +86,7 @@ def make_people(sim, popdict=None, save_pop=False, popfile=None, die=True, reset
         sim['prognoses'] = cvpar.get_prognoses(sim['prog_by_age'], version=sim._default_ver)
 
     # Actually create the people
-    people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts']) # List for storing the people
+    people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts'], tile_uids=popdict.get('tile_uids'), cmatrix=popdict.get('cmatrix')) # List for storing the people
 
     average_age = sum(popdict['age']/pop_size)
     sc.printv(f'Created {pop_size} people, average age {average_age:0.2f} years', 2, verbose)
@@ -177,17 +178,17 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
     elif microstructure == 'hybrid':
         contacts = make_hybrid_contacts(pop_size, ages, pars['contacts'], **kwargs)
     elif microstructure == 'matrix':
-        contact_matrix = {}
-        contact_matrix['h'] = np.genfromtxt(pars['home_matrix'], delimiter=' ')
-        contact_matrix['s'] = np.genfromtxt(pars['school_matrix'], delimiter=' ')
-        contact_matrix['w'] = np.genfromtxt(pars['work_matrix'], delimiter=' ')
-        contacts = make_matrix_based_contacts(pop_size, ages, contact_matrix)
+        contacts, tile_based_uids, cmatrix = cvs.Matrix.make_population(pars, pop_size, ages)
     else: # pragma: no cover
         errormsg = f'Microstructure type "{microstructure}" not found; choices are random, hybrid or matrix'
         raise NotImplementedError(errormsg)
 
     popdict['contacts']   = contacts
     popdict['layer_keys'] = list(pars['contacts'].keys())
+
+    if microstructure == 'matrix':
+        popdict['tile_uids'] = tile_based_uids
+        popdict['cmatrix'] = cmatrix
 
     return popdict
 
@@ -328,48 +329,6 @@ def make_hybrid_contacts(pop_size, ages, contacts, school_ages=None, work_ages=N
     contacts_dict['w'] = make_random_contacts(len(w_inds), contacts['w'], mapping=w_inds)
 
     return contacts_dict
-
-def make_matrix_based_contacts(pop_size, ages, contact_matrix):
-    pop_size = int(pop_size) # Number of people
-    contact_matrix = sc.dcp(contact_matrix)
-
-    bin_size, n_bins = 5, 16
-    age_based_uids = [[]]*n_bins
-    for uid in range(pop_size):
-        age_idx = -1 if ages[uid]>=75 else int(ages[uid]/bin_size)
-        age_based_uids[age_idx].append(uid)
-    # shuffle elements in each age bin
-    for elems in age_based_uids:
-        np.random.shuffle(elems)
-
-    contacts = dict()
-
-    # household contacts
-    hm = contact_matrix['h']
-    uids = np.argsort(ages)  # uids sorted based on age
-    used_uids = set()
-    used_pos = [[0]] * n_bins
-    for p in uids:
-        if p in used_uids:
-            continue
-        used_uids.add(p)
-
-        idx = -1 if ages[p] >= 75 else int(ages[p]/bin_size)
-        cnt_contacts = [cvu.poisson(c) for c in hm[idx]]
-        for idx, cnt in enumerate(cnt_contacts):
-
-
-    for p in range(pop_size):
-        for c in layer_keys:
-            contacts_list[p][c] = list(contacts_list[p][c])
-
-    if 'c' not in layer_keys:
-        layer_keys.append('c')
-        c_contacts, _ = make_random_contacts(pop_size, 20)
-        for i in range(pop_size):
-            contacts_list[i]['c'] = c_contacts[i]['c']
-
-    return contacts_list
 
 
 def make_synthpop(sim=None, population=None, layer_mapping=None, community_contacts=None, **kwargs): # pragma: no cover

@@ -13,6 +13,8 @@ from . import utils as cvu
 from . import misc as cvm
 from . import defaults as cvd
 from . import parameters as cvpar
+from . import syn_matrix as cvs
+
 
 # Specify all externally visible classes this file defines
 __all__ = ['ParsObj', 'Result', 'BaseSim', 'BasePeople', 'Person', 'FlexDict', 'Contacts', 'Layer']
@@ -1708,7 +1710,7 @@ class Layer(FlexDict):
         return contact_inds
 
 
-    def update(self, people, frac=1.0):
+    def update(self, people, date=None, frac=1.0):
         '''
         Regenerate contacts on each timestep.
 
@@ -1725,15 +1727,24 @@ class Layer(FlexDict):
             people (People): the Covasim People object, which is usually used to make new contacts
             frac (float): the fraction of contacts to update on each timestep
         '''
-        # Choose how many contacts to make
-        pop_size   = len(people) # Total number of people
-        n_contacts = len(self) # Total number of contacts
-        n_new = int(np.round(n_contacts*frac)) # Since these get looped over in both directions later
-        inds = cvu.choose(n_contacts, n_new)
 
-        # Create the contacts, not skipping self-connections
-        self['p1'][inds]   = np.array(cvu.choose_r(max_n=pop_size, n=n_new), dtype=cvd.default_int) # Choose with replacement
-        self['p2'][inds]   = np.array(cvu.choose_r(max_n=pop_size, n=n_new), dtype=cvd.default_int)
-        self['beta'][inds] = np.ones(n_new, dtype=cvd.default_float)
+        if people.pars['pop_type'] == 'matrix':
+            if date != None:
+                print(date)
+            mobility = np.genfromtxt(people.pars['mobility'], delimiter=',')
+            comm_contact = cvs.Matrix.get_community_contact(people.tile_uids, mobility, people.cmatrix)
+            self['p1'], self['p2'] = comm_contact['p1'], comm_contact['p2']
+            self['beta'] = np.ones(len(self), dtype=cvd.default_float)
+        else:
+            # Choose how many contacts to make
+            pop_size   = len(people) # Total number of people
+            n_contacts = len(self) # Total number of contacts
+            n_new = int(np.round(n_contacts*frac)) # Since these get looped over in both directions later
+            inds = cvu.choose(n_contacts, n_new)
+
+            # Create the contacts, not skipping self-connections
+            self['p1'][inds]   = np.array(cvu.choose_r(max_n=pop_size, n=n_new), dtype=cvd.default_int) # Choose with replacement
+            self['p2'][inds]   = np.array(cvu.choose_r(max_n=pop_size, n=n_new), dtype=cvd.default_int)
+            self['beta'][inds] = np.ones(n_new, dtype=cvd.default_float)
         return
 
