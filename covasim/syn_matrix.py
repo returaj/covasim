@@ -8,7 +8,7 @@ from . import utils as cvu
 from . import defaults as cvd
 import seaborn as sns
 import matplotlib
-# matplotlib.use('Agg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
@@ -64,28 +64,6 @@ class Matrix:
 		return p1, p2, avg_home_size
 
 	@staticmethod
-	def generate_ws_contact_deprecated(age_based_uids, matrix):
-		n_age_bins = 16
-		p1, p2 = [], []
-		avg_contact_per_age = [0] * n_age_bins
-		for i in range(0, n_age_bins):
-			avg_contact, total_uid = 0, 0
-			n_uids = len(age_based_uids[i])
-			for j in range(n_uids):
-				source_uid = age_based_uids[i][j]
-				contact_per_uid = 0
-				for k in range(i, n_age_bins):
-					num_contact = int(cvu.poisson(matrix[i, k])/2)
-					contact_per_uid += num_contact
-					indices = cvu.choose_r(max_n=len(age_based_uids[k]), n=num_contact)
-					for pos in indices:
-						p1.append(source_uid); p2.append(age_based_uids[k][pos])
-				total_uid += 1
-				avg_contact += (contact_per_uid - avg_contact) / total_uid
-			avg_contact_per_age[i] = avg_contact
-		return p1, p2, avg_contact_per_age
-
-	@staticmethod
 	def generate_ws_contact(age_based_uids, matrix):
 		n_age_bins = 16
 		p1, p2 = [], []
@@ -94,18 +72,22 @@ class Matrix:
 			ni_uids = len(age_based_uids[i])
 			for j in range(i, n_age_bins):
 				nj_uids = len(age_based_uids[j])
-				used_j = nj_uids - 1
+				actual_contacts = np.zeros(nj_uids, dtype=cvd.default_int)
 				num_contacts = cvu.n_poisson(matrix[i, j], ni_uids)
 				for ui in range(ni_uids):
-					if i == j and ui > used_j:
-						break
 					req_contact = num_contacts[ui]
-					start, end = used_j, used_j-req_contact
-					used_j = end
-					for uj in range(start, end, -1):
+					if i == j:
+						req_contact = max(req_contact-actual_contacts[ui], 0)
+					start, end = ui+1, ui+1+req_contact
+					for uj in range(start, end):
+						if uj >= nj_uids:
+							uj = (uj % nj_uids)
+						if age_based_uids[i][ui] == age_based_uids[j][uj]:  # avoid self loop
+							continue
+						if i == j: # calculate actual contacts if both are in same bins
+							actual_contacts[ui] += 1
+						actual_contacts[uj] += 1 # calculate actual contacts
 						p1.append(age_based_uids[i][ui])
-						if uj < 0:
-							uj = nj_uids - (abs(uj) % nj_uids)
 						p2.append(age_based_uids[j][uj])
 						avg_contact_per_age[j] += 1
 						avg_contact_per_age[i] += 1
@@ -156,6 +138,7 @@ class Matrix:
 	@staticmethod
 	def get_community_contact(tile_based_uids, mobility, cm):
 		n_tiles, n_age_bins = len(tile_based_uids), 16
+		used_uids = [[0]*n_age_bins for t in range(n_tiles)]
 		p1, p2 = [], []
 		for t in range(n_tiles):
 			age_based_uids = tile_based_uids[t]
@@ -166,18 +149,24 @@ class Matrix:
 					source_uid = age_based_uids[i][j]
 					probs = np.random.rand(n_age_bins)
 					for k in range(n_age_bins):
-						num_contact = (cvu.poisson(cm[i, k])/2)  # can be divided by 2.0
+						# num_contact = int(cvu.poisson(cm[i, k])/2)  #division by 2.0 is necessary so that we donot double the expected contact 
+						num_contact = cvu.poisson(cm[i, k]) if probs[k] > 0.5 else 0  # it is similar to dividing by 2
 						if num_contact > 0:
 							tile_id = Matrix.get_tile_id(probs[k], cum_mobility)
 							selected_uids = tile_based_uids[tile_id][k]
-							indices = cvu.choose_r(max_n=len(selected_uids), n=num_contact)
-							for pos in indices:
+							selected_uids_length = len(selected_uids)
+							start, end = used_uids[tile_id][k], used_uids[tile_id][k]+num_contact
+							used_uids[tile_id][k] = (end % selected_uids_length)
+							for pos in range(start, end):
+								pos = (pos % selected_uids_length)
+								if source_uid == selected_uids[pos]: # skip self loop
+									continue
 								p1.append(source_uid); p2.append(selected_uids[pos])
 		output = dict(p1=np.array(p1, dtype=cvd.default_int), p2=np.array(p2, dtype=cvd.default_int))
 		return output
 
 	@staticmethod
-	def display_synthetic_contact_matrix(contacts, ages, name):
+	def display_synthetic_contact_matrix(contacts, ages, actual_matrix, name):
 		print(f'Layer name: {name}')
 		bin_size, n_age_bins = 5, 16
 
@@ -187,18 +176,25 @@ class Matrix:
 			pop_by_age[idx] += 1
 
 		p1, p2 = contacts['p1'], contacts['p2']
-		matrix = np.zeros((n_age_bins, n_age_bins))
+		syn_matrix = np.zeros((n_age_bins, n_age_bins))
 		for i in range(len(p1)):
 			m = 15 if ages[p1[i]] >= 75 else int(ages[p1[i]]/bin_size)
 			n = 15 if ages[p2[i]] >= 75 else int(ages[p2[i]]/bin_size)
-			matrix[m, n] += 1
-			matrix[n, m] += 1
+			syn_matrix[m, n] += 1
+			syn_matrix[n, m] += 1
 
-		matrix /= pop_by_age[:, np.newaxis]
-		ax = sns.heatmap(matrix, linewidth=0.5, cmap="Blues")
-		plt.title(f'Age based contact for layer {name}')
-		# plt.savefig(f'syn_{name}_contact_matrix.png')
-		plt.show()
+		syn_matrix /= pop_by_age[:, np.newaxis]
+
+		np.savetxt('tmp.csv', syn_matrix, delimiter=',')
+
+		fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12,4))		
+		sns.heatmap(syn_matrix, linewidth=0.5, cmap="Blues", ax=ax1)
+		ax1.set_title(f'synthetic {name} contact matrix')
+		sns.heatmap(actual_matrix, linewidth=0.5, cmap="Blues", ax=ax2)
+		ax2.set_title(f'actual {name} contact matrix')
+
+		plt.savefig(f'syn_{name}_contact_matrix.png')
+		# plt.show()
 
 	@staticmethod
 	def make_population(pars, pop_size, ages):
@@ -230,26 +226,26 @@ class Matrix:
 	    # home contact
 	    hm = np.genfromtxt(pars['home_matrix'], delimiter=' ')
 	    contacts['h'] = Matrix.get_same_tile_contact(tile_based_uids, hm, 'home')
-	    Matrix.display_synthetic_contact_matrix(contacts['h'], ages, 'home')
+	    Matrix.display_synthetic_contact_matrix(contacts['h'], ages, hm, 'home')
 	    print('Home contact completed')
 
 	    # work contact
 	    wm = np.genfromtxt(pars['work_matrix'], delimiter=' ')
 	    contacts['w'] = Matrix.get_same_tile_contact(tile_based_uids, wm, 'work')
-	    Matrix.display_synthetic_contact_matrix(contacts['w'], ages, 'work')
+	    Matrix.display_synthetic_contact_matrix(contacts['w'], ages, wm, 'work')
 	    print('Work contact completed')
 
 	    # school contact
 	    sm = np.genfromtxt(pars['school_matrix'], delimiter=' ')
 	    contacts['s'] = Matrix.get_same_tile_contact(tile_based_uids, sm, 'school')
-	    Matrix.display_synthetic_contact_matrix(contacts['s'], ages, 'school')
+	    Matrix.display_synthetic_contact_matrix(contacts['s'], ages, sm, 'school')
 	    print('School contact completed')
 
 	    # community contact
 	    cm = np.genfromtxt(pars['community_matrix'], delimiter=',')
 	    mobility = np.genfromtxt(pars['mobility'], delimiter=',')
 	    contacts['c'] = Matrix.get_community_contact(tile_based_uids, mobility, cm)
-	    Matrix.display_synthetic_contact_matrix(contacts['c'], ages, 'community')
+	    Matrix.display_synthetic_contact_matrix(contacts['c'], ages, cm, 'community')
 	    print('Community contact completed')
 
 	    raise Exception('break')
