@@ -64,7 +64,7 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     # bing tiles
     pars['tiles'] = None
 
-    # mobility matrix
+    # mobility parameter
     pars['mobility'] = None
 
     # population density

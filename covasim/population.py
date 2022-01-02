@@ -14,6 +14,7 @@ from . import defaults as cvd
 from . import parameters as cvpar
 from . import people as cvppl
 from . import syn_matrix as cvs
+import time
 
 
 # Specify all externally visible functions this file defines
@@ -192,6 +193,20 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
 
     return popdict
 
+def compare_contacts(pars, ages, contacts):
+    hm = np.genfromtxt(pars['home_matrix'], delimiter=' ')
+    cvs.Matrix.display_synthetic_contact_matrix(contacts['h'], ages, hm, 'home')
+
+    wm = np.genfromtxt(pars['work_matrix'], delimiter=' ')
+    cvs.Matrix.display_synthetic_contact_matrix(contacts['w'], ages, wm, 'work')
+
+    sm = np.genfromtxt(pars['school_matrix'], delimiter=' ')
+    cvs.Matrix.display_synthetic_contact_matrix(contacts['s'], ages, sm, 'school')
+
+    cm = np.genfromtxt(pars['community_matrix'], delimiter=',')
+    cvs.Matrix.display_synthetic_contact_matrix(contacts['c'], ages, cm, 'community')
+
+    raise Exception('break comparision')
 
 def _tidy_edgelist(p1, p2, mapping):
     ''' Helper function to convert lists to arrays and optionally map arrays '''

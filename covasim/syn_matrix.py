@@ -115,12 +115,13 @@ class Matrix:
 				raise Exception(f'ctype should be either home, work or school, but was given {ctype}')
 			
 			p1.append(qp1); p2.append(qp2)
-		if ctype == 'home':
-			print(f'Avg home size: {avg_home_size}')
-		if ctype == 'work' or ctype == 'school':
-			print(f'Avg contact per age bin in layer {ctype}')
-			for i in range(n_age_bins):
-				print(f'age_bin_{i} : {avg_ws_contact_per_age[i]}')
+		# print statements for verification 
+		# if ctype == 'home':
+		# 	print(f'Avg home size: {avg_home_size}')
+		# if ctype == 'work' or ctype == 'school':
+		# 	print(f'Avg contact per age bin in layer {ctype}')
+		# 	for i in range(n_age_bins):
+		# 		print(f'age_bin_{i} : {avg_ws_contact_per_age[i]}')
 		output = dict(p1=np.concatenate(p1, dtype=cvd.default_int), p2=np.concatenate(p2, dtype=cvd.default_int))
 		return output
 
@@ -226,28 +227,22 @@ class Matrix:
 	    # home contact
 	    hm = np.genfromtxt(pars['home_matrix'], delimiter=' ')
 	    contacts['h'] = Matrix.get_same_tile_contact(tile_based_uids, hm, 'home')
-	    Matrix.display_synthetic_contact_matrix(contacts['h'], ages, hm, 'home')
-	    print('Home contact completed')
+	    # Matrix.display_synthetic_contact_matrix(contacts['h'], ages, hm, 'home')
 
 	    # work contact
 	    wm = np.genfromtxt(pars['work_matrix'], delimiter=' ')
 	    contacts['w'] = Matrix.get_same_tile_contact(tile_based_uids, wm, 'work')
-	    Matrix.display_synthetic_contact_matrix(contacts['w'], ages, wm, 'work')
-	    print('Work contact completed')
+	    # Matrix.display_synthetic_contact_matrix(contacts['w'], ages, wm, 'work')
 
 	    # school contact
 	    sm = np.genfromtxt(pars['school_matrix'], delimiter=' ')
 	    contacts['s'] = Matrix.get_same_tile_contact(tile_based_uids, sm, 'school')
-	    Matrix.display_synthetic_contact_matrix(contacts['s'], ages, sm, 'school')
-	    print('School contact completed')
+	    # Matrix.display_synthetic_contact_matrix(contacts['s'], ages, sm, 'school')
 
 	    # community contact
 	    cm = np.genfromtxt(pars['community_matrix'], delimiter=',')
 	    mobility = np.genfromtxt(pars['mobility'], delimiter=',')
 	    contacts['c'] = Matrix.get_community_contact(tile_based_uids, mobility, cm)
-	    Matrix.display_synthetic_contact_matrix(contacts['c'], ages, cm, 'community')
-	    print('Community contact completed')
-
-	    raise Exception('break')
+	    # Matrix.display_synthetic_contact_matrix(contacts['c'], ages, cm, 'community')
 
 	    return contacts, tile_based_uids, cm
