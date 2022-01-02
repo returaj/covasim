@@ -15,6 +15,7 @@ from . import defaults as cvd
 from . import base as cvb
 from . import parameters as cvpar
 from . import immunity as cvi
+from . import syn_matrix as cvs
 from collections import defaultdict
 
 
@@ -525,7 +526,7 @@ class sequence(Intervention):
 
 #%% Beta interventions
 
-__all__+= ['change_beta', 'clip_edges']
+__all__+= ['change_beta', 'clip_edges', 'clip_tiles']
 
 
 class change_beta(Intervention):
@@ -636,10 +637,8 @@ class clip_edges(Intervention):
 
 
     def apply(self, sim):
-
         # If this day is found in the list, apply the intervention
         for ind in find_day(self.days, sim.t, interv=self, sim=sim):
-
             # Do the contact moving
             for lkey in self.layers:
                 s_layer = sim.people.contacts[lkey] # Contact layer in the sim
@@ -672,6 +671,72 @@ class clip_edges(Intervention):
         self.contacts = None # Reset to save memory
         return
 
+
+class clip_tiles(Intervention):
+    def __init__(self, days, changes, tile_ids, layers=None, **kwargs):
+        super().__init__(**kwargs)
+        self.days = sc.dcp(days)
+        self.changes = sc.dcp(changes)
+        self.tile_ids = sc.dcp(tile_ids)
+        self.layers = sc.dcp(layers)
+        self.contacts = None
+        self.orig_factor = None
+
+    def initialize(self, sim):
+        super().initialize()
+        self.days = process_days(sim, self.days)
+        self.changes = process_changes(sim, self.changes, self.days)
+        if self.layers is None:
+            self.layers = sim.layer_keys()
+        else:
+            self.layers = sc.promotetolist(self.layers)
+        self.contacts, self.orig_factor = {}, {}
+        for tile in self.tile_ids:
+            self.contacts[tile] = cvb.Contacts(layer_keys=self.layers)
+            self.orig_factor[tile] = sim.people.ccfactor[tile]
+
+    def apply(self, sim):
+        for ind in find_day(self.days, sim.t, interv=self, sim=sim):
+            for lkey in self.layers:
+                # update tile based contacts
+                for tile in self.tile_ids:
+                    if lkey == 'c':
+                        sim.people.ccfactor[tile] = self.orig_factor[tile] * self.changes[ind]
+                    else:
+                        s_layer = sim.people.contacts[lkey]
+                        i_layer = self.contacts[tile][lkey]
+                        tile_info = sim.people.tile_info
+                        n_sim = tile_info.size(tile, lkey) # Number of contacts in the simulation layer
+                        n_int = len(i_layer) # Number of contacts in the intervention layer
+                        n_contacts = n_sim + n_int # Total number of contacts
+                        if n_contacts:
+                            current_prop = n_sim/n_contacts # Current proportion of contacts in the sim, e.g. 1.0 initially
+                            desired_prop = self.changes[ind] # Desired proportion, e.g. 0.5
+                            prop_to_move = current_prop - desired_prop # Calculate the proportion of contacts to move
+                            n_to_move = int(prop_to_move*n_contacts) # Number of contacts to move
+                            from_sim = (n_to_move>0) # Check if we're moving contacts from the sim
+                            if from_sim:
+                                inds = tile_info.sample_ids(n_to_move, tile, lkey)
+                                tile_info.update_indx(-n_to_move, tile, lkey)
+                                to_move = s_layer.pop_inds(inds)
+                                i_layer.append(to_move)
+                            else:
+                                inds = cvu.choose(max_n=n_int, n=abs(n_to_move))
+                                to_move = i_layer.pop_inds(inds)
+                                at_pos = tile_info[lkey][tile]
+                                s_layer.append_tile_based(at_pos, to_move)
+                                tile_info.update_indx(abs(n_to_move), tile, lkey)
+                        else:
+                            print(f'Warning: clip_tiles() was applied to layer "{lkey}", but no edges were found; please check sim.people.contacts["{lkey}"]')
+        return
+
+    def finalize(self, sim):
+        ''' Ensure the edges get deleted at the end '''
+        super().finalize()
+        # Reset to save memory
+        self.contacts = None
+        self.orig_factor = None 
+        return
 
 
 #%% Testing interventions

@@ -5,10 +5,11 @@ Defines functions for making the matrix based population.
 import numpy as np
 import pandas as pd
 from . import utils as cvu
+from . import base as cvb
 from . import defaults as cvd
 import seaborn as sns
 import matplotlib
-matplotlib.use('Agg')
+# matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
@@ -99,6 +100,7 @@ class Matrix:
 	@staticmethod
 	def get_same_tile_contact(tile_based_uids, matrix, ctype):
 		p1, p2 = [], []
+		curr_size, tile_info = 0, []
 		avg_home_size, total_tiles = 0, 0
 		n_age_bins = 16
 		avg_ws_contact_per_age = [0] * n_age_bins
@@ -113,8 +115,9 @@ class Matrix:
 					avg_ws_contact_per_age[i] += (qavg_size[i] - avg_ws_contact_per_age[i]) / total_tiles
 			else:
 				raise Exception(f'ctype should be either home, work or school, but was given {ctype}')
-			
 			p1.append(qp1); p2.append(qp2)
+			curr_size += len(qp1)
+			tile_info.append(curr_size)
 		# print statements for verification 
 		# if ctype == 'home':
 		# 	print(f'Avg home size: {avg_home_size}')
@@ -123,7 +126,7 @@ class Matrix:
 		# 	for i in range(n_age_bins):
 		# 		print(f'age_bin_{i} : {avg_ws_contact_per_age[i]}')
 		output = dict(p1=np.concatenate(p1, dtype=cvd.default_int), p2=np.concatenate(p2, dtype=cvd.default_int))
-		return output
+		return output, tile_info
 
 	@staticmethod
 	def get_tile_id(prob, cum_probs):
@@ -137,7 +140,7 @@ class Matrix:
 		return l
 
 	@staticmethod
-	def get_community_contact(tile_based_uids, mobility, cm):
+	def get_community_contact(tile_based_uids, mobility, cm, contact_factor):
 		n_tiles, n_age_bins = len(tile_based_uids), 16
 		used_uids = [[0]*n_age_bins for t in range(n_tiles)]
 		p1, p2 = [], []
@@ -156,6 +159,7 @@ class Matrix:
 							tile_id = Matrix.get_tile_id(probs[k], cum_mobility)
 							selected_uids = tile_based_uids[tile_id][k]
 							selected_uids_length = len(selected_uids)
+							num_contact = int(num_contact * contact_factor[tile_id]) # how does contact factor changes based on tile
 							start, end = used_uids[tile_id][k], used_uids[tile_id][k]+num_contact
 							used_uids[tile_id][k] = (end % selected_uids_length)
 							for pos in range(start, end):
@@ -186,16 +190,17 @@ class Matrix:
 
 		syn_matrix /= pop_by_age[:, np.newaxis]
 
-		np.savetxt('tmp.csv', syn_matrix, delimiter=',')
+		# np.savetxt('tmp.csv', syn_matrix, delimiter=',')
 
 		fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12,4))		
 		sns.heatmap(syn_matrix, linewidth=0.5, cmap="Blues", ax=ax1)
 		ax1.set_title(f'synthetic {name} contact matrix')
-		sns.heatmap(actual_matrix, linewidth=0.5, cmap="Blues", ax=ax2)
-		ax2.set_title(f'actual {name} contact matrix')
+		if actual_matrix is not None:
+			sns.heatmap(actual_matrix, linewidth=0.5, cmap="Blues", ax=ax2)
+			ax2.set_title(f'actual {name} contact matrix')
 
-		plt.savefig(f'syn_{name}_contact_matrix.png')
-		# plt.show()
+		# plt.savefig(f'syn_{name}_contact_matrix.png')
+		plt.show()
 
 	@staticmethod
 	def make_population(pars, pop_size, ages):
@@ -223,26 +228,31 @@ class Matrix:
 	    	tile_based_uids.append(tile_age_uids)
 
 	    contacts = dict()
+	    tile_info = cvb.TileInfo()
 
 	    # home contact
 	    hm = np.genfromtxt(pars['home_matrix'], delimiter=' ')
-	    contacts['h'] = Matrix.get_same_tile_contact(tile_based_uids, hm, 'home')
+	    contacts['h'], hinfo = Matrix.get_same_tile_contact(tile_based_uids, hm, 'home')
+	    tile_info.set_key(hinfo, 'h')
 	    # Matrix.display_synthetic_contact_matrix(contacts['h'], ages, hm, 'home')
 
 	    # work contact
 	    wm = np.genfromtxt(pars['work_matrix'], delimiter=' ')
-	    contacts['w'] = Matrix.get_same_tile_contact(tile_based_uids, wm, 'work')
+	    contacts['w'], winfo = Matrix.get_same_tile_contact(tile_based_uids, wm, 'work')
+	    tile_info.set_key(winfo, 'w')
 	    # Matrix.display_synthetic_contact_matrix(contacts['w'], ages, wm, 'work')
 
 	    # school contact
 	    sm = np.genfromtxt(pars['school_matrix'], delimiter=' ')
-	    contacts['s'] = Matrix.get_same_tile_contact(tile_based_uids, sm, 'school')
+	    contacts['s'], sinfo = Matrix.get_same_tile_contact(tile_based_uids, sm, 'school')
+	    tile_info.set_key(sinfo, 's')
 	    # Matrix.display_synthetic_contact_matrix(contacts['s'], ages, sm, 'school')
 
 	    # community contact
 	    cm = np.genfromtxt(pars['community_matrix'], delimiter=',')
 	    mobility = np.genfromtxt(pars['mobility'], delimiter=',')
-	    contacts['c'] = Matrix.get_community_contact(tile_based_uids, mobility, cm)
+	    contact_factor = np.ones(len(tiles), dtype=float)
+	    contacts['c'] = Matrix.get_community_contact(tile_based_uids, mobility, cm, contact_factor)
 	    # Matrix.display_synthetic_contact_matrix(contacts['c'], ages, cm, 'community')
 
-	    return contacts, tile_based_uids, cm
+	    return contacts, tile_based_uids, tile_info, cm, contact_factor

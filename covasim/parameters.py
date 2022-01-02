@@ -203,10 +203,12 @@ def reset_layer_pars(pars, layer_keys=None, force=False):
         quar_factor = dict(h=0.6, s=0.2, w=0.2, c=0.2),  # Multiply beta by this factor for people in quarantine
     )
 
+    # Specify defaults for matrix -- household, school, work, and community layers (h, s, w, c)
+    layer_defaults['matrix'] = sc.dcp(layer_defaults['hybrid'])
+
     # Specify defaults for SynthPops -- same as hybrid except for LTCF layer (l)
     l_pars = dict(beta_layer=1.5, contacts=10, dynam_layer=0, iso_factor=0.2, quar_factor=0.3)
     layer_defaults['synthpops'] = sc.dcp(layer_defaults['hybrid'])
-    layer_defaults['matrix'] = sc.dcp(layer_defaults['hybrid'])
     for key,val in l_pars.items():
         layer_defaults['synthpops'][key]['l'] = val
 

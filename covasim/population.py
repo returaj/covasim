@@ -87,7 +87,7 @@ def make_people(sim, popdict=None, save_pop=False, popfile=None, die=True, reset
         sim['prognoses'] = cvpar.get_prognoses(sim['prog_by_age'], version=sim._default_ver)
 
     # Actually create the people
-    people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts'], tile_uids=popdict.get('tile_uids'), cmatrix=popdict.get('cmatrix')) # List for storing the people
+    people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts'], tile_uids=popdict.get('tile_uids'), tile_info=popdict.get('tile_info'), cmatrix=popdict.get('cmatrix'), ccfactor=popdict.get('comm_contact_factor')) # List for storing the people
 
     average_age = sum(popdict['age']/pop_size)
     sc.printv(f'Created {pop_size} people, average age {average_age:0.2f} years', 2, verbose)
@@ -179,7 +179,7 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
     elif microstructure == 'hybrid':
         contacts = make_hybrid_contacts(pop_size, ages, pars['contacts'], **kwargs)
     elif microstructure == 'matrix':
-        contacts, tile_based_uids, cmatrix = cvs.Matrix.make_population(pars, pop_size, ages)
+        contacts, tile_based_uids, tile_info, cmatrix, comm_contact_factor = cvs.Matrix.make_population(pars, pop_size, ages)
     else: # pragma: no cover
         errormsg = f'Microstructure type "{microstructure}" not found; choices are random, hybrid or matrix'
         raise NotImplementedError(errormsg)
@@ -189,7 +189,9 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
 
     if microstructure == 'matrix':
         popdict['tile_uids'] = tile_based_uids
+        popdict['tile_info'] = tile_info
         popdict['cmatrix'] = cmatrix
+        popdict['comm_contact_factor'] = comm_contact_factor
 
     return popdict
 

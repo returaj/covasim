@@ -1618,6 +1618,28 @@ class Layer(FlexDict):
         return output
 
 
+    def append_tile_based(self, tile_pos, contacts):
+        for key in self.keys():
+            new_contacts = contacts[key]
+            n_new = len(new_contacts)
+            n_curr = len(self[key])
+            n_total = n_new + n_curr
+            new_arr = np.zeros(n_total, dtype=self.meta.get(key))
+            n, c = 0, 0
+            for i in range(n_total):
+                till = tile_pos + n_new
+                if i>= tile_pos and i < till:
+                    new_arr[i] = new_contacts[n]
+                    n += 1
+                elif c < n_curr:
+                    new_arr[i] = self[key][c]
+                    c += 1
+                else:
+                    raise Exception(f"where did you come from ?? {i} {tile_pos} {till} {n} {c}")
+            self[key] = new_arr
+        return
+
+
     def append(self, contacts):
         '''
         Append contacts to the current layer.
@@ -1731,8 +1753,10 @@ class Layer(FlexDict):
         if people.pars['pop_type'] == 'matrix':
             if date != None:
                 print(date)
-            mobility = np.genfromtxt(people.pars['mobility'], delimiter=',')
-            comm_contact = cvs.Matrix.get_community_contact(people.tile_uids, mobility, people.cmatrix)
+                mobility = np.genfromtxt(people.pars['mobility'], delimiter=',')
+            else:
+                mobility = np.genfromtxt(people.pars['mobility'], delimiter=',')
+            comm_contact = cvs.Matrix.get_community_contact(people.tile_uids, mobility, people.cmatrix, people.ccfactor)
             self['p1'], self['p2'] = comm_contact['p1'], comm_contact['p2']
             self['beta'] = np.ones(len(self), dtype=cvd.default_float)
         else:
@@ -1748,3 +1772,35 @@ class Layer(FlexDict):
             self['beta'][inds] = np.ones(n_new, dtype=cvd.default_float)
         return
 
+
+class TileInfo(FlexDict):
+    def __init__(self, layer_keys=None):
+        if layer_keys is not None:
+            for lkey in layer_keys:
+                self[lkey] = []
+        return
+
+    def append(self, val, lkey):
+        if lkey not in self.keys():
+            self[lkey] = []
+        self[lkey].append(val)
+        return
+
+    def set_key(self, val, lkey):
+        self[lkey] = sc.promotetolist(val)
+
+    def size(self, indx, lkey):
+        start_id = (0 if indx == 0 else self[lkey][indx-1])
+        size = self[lkey][indx] - start_id
+        return size
+
+    def sample_ids(self, n_samples, indx, lkey):
+        start_id = (0 if indx == 0 else self[lkey][indx-1])
+        size = self.size(indx, lkey)
+        ids = cvu.choose(size, n_samples) + start_id
+        return ids
+
+    def update_indx(self, val, indx, lkey):
+        for i in range(indx, len(self[lkey])):
+            self[lkey][i] += val
+        return

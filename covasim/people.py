@@ -110,11 +110,23 @@ class People(cvb.BasePeople):
             if tile_uids:
                 self.tile_uids = tile_uids
 
+        # Handles TileInfo, it stores the information of tile based contacts
+        if 'tile_info' in kwargs:
+            tile_info = kwargs.pop('tile_info')
+            if tile_info is not None:
+                self.tile_info = tile_info
+
         # cmatrix: for matrix based microstructure
         if 'cmatrix' in kwargs:
             cmatrix = kwargs.pop('cmatrix')
             if cmatrix is not None:
                 self.cmatrix = cmatrix
+
+        # community contact factor for matrix based microstructure
+        if 'ccfactor' in kwargs:
+            ccfactor = kwargs.pop('ccfactor')
+            if ccfactor is not None:
+                self.ccfactor = ccfactor
 
         # Handle all other values, e.g. age
         for key,value in kwargs.items():
