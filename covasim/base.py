@@ -1752,7 +1752,7 @@ class Layer(FlexDict):
 
         if people.pars['pop_type'] == 'matrix':
             if date != None:
-                print(date)
+                # print(date)
                 mobility = np.genfromtxt(people.pars['mobility'], delimiter=',')
             else:
                 mobility = np.genfromtxt(people.pars['mobility'], delimiter=',')

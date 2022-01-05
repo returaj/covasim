@@ -200,7 +200,7 @@ class Matrix:
 			ax2.set_title(f'actual {name} contact matrix')
 
 		# plt.savefig(f'syn_{name}_contact_matrix.png')
-		plt.show()
+		# plt.show()
 
 	@staticmethod
 	def make_population(pars, pop_size, ages):
