@@ -70,6 +70,12 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     # population density
     pars['pop_density'] = None
 
+    # initial infection rates
+    pars['init_infection'] = None # eg: dict(tiles=[1/31]*31, ages=[1/16]*16)
+
+    # vaccine data
+    pars['vaccine_data'] = None
+
     # Basic disease transmission parameters
     pars['beta_dist']    = dict(dist='neg_binomial', par1=1.0, par2=0.45, step=0.01) # Distribution to draw individual level transmissibility; dispersion from https://www.researchsquare.com/article/rs-29548/v1
     pars['viral_dist']   = dict(frac_time=0.3, load_ratio=2, high_cap=4) # The time varying viral load (transmissibility); estimated from Lescure 2020, Lancet, https://doi.org/10.1016/S1473-3099(20)30200-0

@@ -1849,6 +1849,90 @@ class vaccinate_num(BaseVaccination):
         return vacc_inds
 
 
+class vaccinate_tiles(BaseVaccination):
+    def __init__(self, vaccine, num_doses, booster=False, sequence=None, **kwargs):
+        super().__init__(vaccine,**kwargs) # Initialize the Intervention object
+        self.sequence   = sequence
+        self.num_doses  = num_doses
+        self.booster    = booster
+        self.subtarget  = subtarget
+        self._scheduled_doses = defaultdict(lambda: defaultdict(set))  # Track scheduled second doses, where applicable
+        self.uids_in_tile  = None
+        return
+
+    def initialize(self, sim):
+        super().initialize(sim)
+        # Perform checks and process inputs
+        if isinstance(self.num_doses, dict): # Convert any dates to simulation days
+            self.num_doses = {sim.day(k):v for k, v in self.num_doses.items()}
+        self.sequence = process_sequence(self.sequence, sim)
+        check_doses(self.p['doses'], self.p['interval'])
+
+        tile_uids = sim.people.tile_uids
+        self.uids_in_tile = []
+        for tid, tuids in enumerate(tile_uids):
+            num_ages = len(tuids)
+            uids = []
+            for a in range(num_ages-1, -1):
+                uids.extend(tuids[a])
+            self.uids_in_tile.append(np.array(uids))
+        return
+
+    def select_people(self, sim):
+        uids_in_tile = self.uids_in_tile
+        people_dead = cvu.true(sim.people.dead)
+        vaccinated_atleast_one = cvu.true(sim.people.vaccinated)
+        not_vaccinated = cvu.false(sim.people.vaccinated)
+        vacc_inds = []
+        for tid, tuids in enumerate(uids_in_tile):
+            # how many people will be vaccinated in a given tile
+            num_people = self.num_doses[sim.t][tid]
+            if num_people == 0:
+                self._scheduled_doses[sim.t + 1][tid].update(self._scheduled_doses[sim.t])  # Defer any extras
+                return np.array([])
+            num_agents = sc.randround(num_people / sim['pop_scale'])
+            if self._scheduled_doses[sim.t][tid]:
+                scheduled = np.fromiter(self._scheduled_doses[sim.t][tid], dtype=cvd.default_int) # Everyone scheduled today
+                scheduled = scheduled[(self.doses[scheduled] < self.p['doses']) & ~sim.people.dead[scheduled]] # Remove anyone who's already had all doses of this vaccine, also dead people
+                if len(scheduled) > num_agents:
+                    np.random.shuffle(scheduled) # Randomly pick who to defer
+                    self._scheduled_doses[sim.t+1][tid].update(scheduled[num_agents:]) # Defer any extras
+                    vacc_inds.append(scheduled[:num_agents])
+                    continue
+            else:
+                scheduled = np.array([], dtype=cvd.default_int)
+
+            vacc_probs = np.ones(len(tuids))
+            vacc_probs[people_dead[tuids]] = 0.0
+
+            if self.booster:
+                vacc_probs[not_vaccinated[tuids]] = 0.0
+            else:
+                vacc_probs[vaccinated_atleast_one[tuids]] = 0.0
+
+            first_dose_eligible = tuids[cvu.binomial_arr(vacc_probs)]
+            if len(first_dose_eligible) == 0:
+                vacc_inds.append(scheduled)
+                continue
+            elif len(first_dose_eligible) > num_agents:
+                first_dose_eligible = first_dose_eligible[:num_agents]
+
+            first_dose_eligible = first_dose_eligible[~np.in1d(first_dose_eligible, scheduled)]
+
+            if (len(first_dose_eligible)+len(scheduled)) > num_agents:
+                first_dose_inds = first_dose_eligible[:(num_agents - len(scheduled))]
+            else:
+                first_dose_inds = first_dose_eligible
+
+            if self.p['doses'] > 1:
+                self._scheduled_doses[sim.t+self.p.interval][tid].update(first_dose_inds)
+
+            vacc_inds.append(scheduled)
+            vacc_inds.append(first_dose_inds)
+
+        vacc_inds = np.concatenate(vacc_inds)
+        return vacc_inds
+
 
 #%% Prior/historical immunity interventions
 
