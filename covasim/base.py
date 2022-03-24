@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import sciris as sc
 import datetime as dt
+from os.path import join
 from . import version as cvv
 from . import utils as cvu
 from . import misc as cvm
@@ -1752,8 +1753,8 @@ class Layer(FlexDict):
 
         if people.pars['pop_type'] == 'matrix':
             if date != None:
-                # print(date)
-                mobility = np.genfromtxt(people.pars['mobility'], delimiter=',')
+                path = join(people.pars['mobility'], f"{date.strftime('%Y-%m-%d')}.csv")
+                mobility = np.genfromtxt(path, delimiter=',')
             else:
                 mobility = np.genfromtxt(people.pars['mobility'], delimiter=',')
             comm_contact = cvs.Matrix.get_community_contact(people.tile_uids, mobility, people.cmatrix, people.ccfactor)

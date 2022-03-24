@@ -71,7 +71,7 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     pars['pop_density'] = None
 
     # initial infection rates
-    pars['init_infection'] = None # eg: dict(tiles=[1/31]*31, ages=[1/16]*16)
+    pars['init_infection'] = dict(tiles=None, ages=None) # eg: dict(tiles=[1/31]*31, ages=[1/16]*16)
 
     # vaccine data
     pars['vaccine_data'] = None

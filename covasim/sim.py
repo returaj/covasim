@@ -461,7 +461,7 @@ class Sim(cvb.BaseSim):
                     age_sample = Counter(np.random.choice(num_ages, pop, p=age_prob))
                     for age, cnt in age_sample.items():
                         inds.append(tile_uids[tid][age][:cnt])
-                inds = np.array(inds)
+                inds = np.concatenate(inds)
             else:
                 inds = cvu.choose(self['pop_size'], self['pop_infected'])
             self.people.infect(inds=inds, layer='seed_infection') # Not counted by results since flows are re-initialized during the step

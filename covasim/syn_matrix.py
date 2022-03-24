@@ -4,6 +4,7 @@ Defines functions for making the matrix based population.
 
 import numpy as np
 import pandas as pd
+from os.path import join
 from . import utils as cvu
 from . import base as cvb
 from . import defaults as cvd
@@ -250,7 +251,8 @@ class Matrix:
 
 	    # community contact
 	    cm = np.genfromtxt(pars['community_matrix'], delimiter=',')
-	    mobility = np.genfromtxt(pars['mobility'], delimiter=',')
+	    mobility_path = join(pars['mobility'], f"{pars['start_day'].strftime('%Y-%m-%d')}.csv")
+	    mobility = np.genfromtxt(mobility_path, delimiter=',')
 	    contact_factor = np.ones(len(tiles), dtype=float)
 	    contacts['c'] = Matrix.get_community_contact(tile_based_uids, mobility, cm, contact_factor)
 	    # Matrix.display_synthetic_contact_matrix(contacts['c'], ages, cm, 'community')
