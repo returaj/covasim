@@ -253,7 +253,7 @@ class Matrix:
 	    cm = np.genfromtxt(pars['community_matrix'], delimiter=',')
 	    mobility_path = join(pars['mobility'], f"{pars['start_day'].strftime('%Y-%m-%d')}.csv")
 	    mobility = np.genfromtxt(mobility_path, delimiter=',')
-	    contact_factor = np.ones(len(tiles), dtype=float)
+	    contact_factor = np.ones(len(tiles), dtype=float) * pars['contact_factor']
 	    contacts['c'] = Matrix.get_community_contact(tile_based_uids, mobility, cm, contact_factor)
 	    # Matrix.display_synthetic_contact_matrix(contacts['c'], ages, cm, 'community')
 

@@ -66,6 +66,7 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
 
     # mobility parameter
     pars['mobility'] = None
+    pars['contact_factor'] = 1.0
 
     # population density
     pars['pop_density'] = None
