@@ -15,6 +15,7 @@ from . import defaults as cvd
 from . import base as cvb
 from . import parameters as cvpar
 from . import immunity as cvi
+from . import syn_matrix as cvs
 from collections import defaultdict
 
 
@@ -525,7 +526,7 @@ class sequence(Intervention):
 
 #%% Beta interventions
 
-__all__+= ['change_beta', 'clip_edges']
+__all__+= ['change_beta', 'clip_edges', 'clip_tiles']
 
 
 class change_beta(Intervention):
@@ -636,10 +637,8 @@ class clip_edges(Intervention):
 
 
     def apply(self, sim):
-
         # If this day is found in the list, apply the intervention
         for ind in find_day(self.days, sim.t, interv=self, sim=sim):
-
             # Do the contact moving
             for lkey in self.layers:
                 s_layer = sim.people.contacts[lkey] # Contact layer in the sim
@@ -672,6 +671,72 @@ class clip_edges(Intervention):
         self.contacts = None # Reset to save memory
         return
 
+
+class clip_tiles(Intervention):
+    def __init__(self, days, changes, tile_ids, layers=None, **kwargs):
+        super().__init__(**kwargs)
+        self.days = sc.dcp(days)
+        self.changes = sc.dcp(changes)
+        self.tile_ids = sc.dcp(tile_ids)
+        self.layers = sc.dcp(layers)
+        self.contacts = None
+        self.orig_factor = None
+
+    def initialize(self, sim):
+        super().initialize()
+        self.days = process_days(sim, self.days)
+        self.changes = process_changes(sim, self.changes, self.days)
+        if self.layers is None:
+            self.layers = sim.layer_keys()
+        else:
+            self.layers = sc.promotetolist(self.layers)
+        self.contacts, self.orig_factor = {}, {}
+        for tile in self.tile_ids:
+            self.contacts[tile] = cvb.Contacts(layer_keys=self.layers)
+            self.orig_factor[tile] = sim.people.ccfactor[tile]
+
+    def apply(self, sim):
+        for ind in find_day(self.days, sim.t, interv=self, sim=sim):
+            for lkey in self.layers:
+                # update tile based contacts
+                for tile in self.tile_ids:
+                    if lkey == 'c':
+                        sim.people.ccfactor[tile] = self.orig_factor[tile] * self.changes[ind]
+                    else:
+                        s_layer = sim.people.contacts[lkey]
+                        i_layer = self.contacts[tile][lkey]
+                        tile_info = sim.people.tile_info
+                        n_sim = tile_info.size(tile, lkey) # Number of contacts in the simulation layer
+                        n_int = len(i_layer) # Number of contacts in the intervention layer
+                        n_contacts = n_sim + n_int # Total number of contacts
+                        if n_contacts:
+                            current_prop = n_sim/n_contacts # Current proportion of contacts in the sim, e.g. 1.0 initially
+                            desired_prop = self.changes[ind] # Desired proportion, e.g. 0.5
+                            prop_to_move = current_prop - desired_prop # Calculate the proportion of contacts to move
+                            n_to_move = int(prop_to_move*n_contacts) # Number of contacts to move
+                            from_sim = (n_to_move>0) # Check if we're moving contacts from the sim
+                            if from_sim:
+                                inds = tile_info.sample_ids(n_to_move, tile, lkey)
+                                tile_info.update_indx(-n_to_move, tile, lkey)
+                                to_move = s_layer.pop_inds(inds)
+                                i_layer.append(to_move)
+                            else:
+                                inds = cvu.choose(max_n=n_int, n=abs(n_to_move))
+                                to_move = i_layer.pop_inds(inds)
+                                at_pos = tile_info[lkey][tile]
+                                s_layer.append_tile_based(at_pos, to_move)
+                                tile_info.update_indx(abs(n_to_move), tile, lkey)
+                        else:
+                            print(f'Warning: clip_tiles() was applied to layer "{lkey}", but no edges were found; please check sim.people.contacts["{lkey}"]')
+        return
+
+    def finalize(self, sim):
+        ''' Ensure the edges get deleted at the end '''
+        super().finalize()
+        # Reset to save memory
+        self.contacts = None
+        self.orig_factor = None 
+        return
 
 
 #%% Testing interventions
@@ -1783,6 +1848,90 @@ class vaccinate_num(BaseVaccination):
 
         return vacc_inds
 
+
+class vaccinate_tiles(BaseVaccination):
+    def __init__(self, vaccine, num_doses, booster=False, sequence=None, **kwargs):
+        super().__init__(vaccine,**kwargs) # Initialize the Intervention object
+        self.sequence   = sequence
+        self.num_doses  = num_doses
+        self.booster    = booster
+        self.subtarget  = subtarget
+        self._scheduled_doses = defaultdict(lambda: defaultdict(set))  # Track scheduled second doses, where applicable
+        self.uids_in_tile  = None
+        return
+
+    def initialize(self, sim):
+        super().initialize(sim)
+        # Perform checks and process inputs
+        if isinstance(self.num_doses, dict): # Convert any dates to simulation days
+            self.num_doses = {sim.day(k):v for k, v in self.num_doses.items()}
+        self.sequence = process_sequence(self.sequence, sim)
+        check_doses(self.p['doses'], self.p['interval'])
+
+        tile_uids = sim.people.tile_uids
+        self.uids_in_tile = []
+        for tid, tuids in enumerate(tile_uids):
+            num_ages = len(tuids)
+            uids = []
+            for a in range(num_ages-1, -1):
+                uids.extend(tuids[a])
+            self.uids_in_tile.append(np.array(uids))
+        return
+
+    def select_people(self, sim):
+        uids_in_tile = self.uids_in_tile
+        people_dead = cvu.true(sim.people.dead)
+        vaccinated_atleast_one = cvu.true(sim.people.vaccinated)
+        not_vaccinated = cvu.false(sim.people.vaccinated)
+        vacc_inds = []
+        for tid, tuids in enumerate(uids_in_tile):
+            # how many people will be vaccinated in a given tile
+            num_people = self.num_doses[sim.t][tid]
+            if num_people == 0:
+                self._scheduled_doses[sim.t + 1][tid].update(self._scheduled_doses[sim.t])  # Defer any extras
+                return np.array([])
+            num_agents = sc.randround(num_people / sim['pop_scale'])
+            if self._scheduled_doses[sim.t][tid]:
+                scheduled = np.fromiter(self._scheduled_doses[sim.t][tid], dtype=cvd.default_int) # Everyone scheduled today
+                scheduled = scheduled[(self.doses[scheduled] < self.p['doses']) & ~sim.people.dead[scheduled]] # Remove anyone who's already had all doses of this vaccine, also dead people
+                if len(scheduled) > num_agents:
+                    np.random.shuffle(scheduled) # Randomly pick who to defer
+                    self._scheduled_doses[sim.t+1][tid].update(scheduled[num_agents:]) # Defer any extras
+                    vacc_inds.append(scheduled[:num_agents])
+                    continue
+            else:
+                scheduled = np.array([], dtype=cvd.default_int)
+
+            vacc_probs = np.ones(len(tuids))
+            vacc_probs[people_dead[tuids]] = 0.0
+
+            if self.booster:
+                vacc_probs[not_vaccinated[tuids]] = 0.0
+            else:
+                vacc_probs[vaccinated_atleast_one[tuids]] = 0.0
+
+            first_dose_eligible = tuids[cvu.binomial_arr(vacc_probs)]
+            if len(first_dose_eligible) == 0:
+                vacc_inds.append(scheduled)
+                continue
+            elif len(first_dose_eligible) > num_agents:
+                first_dose_eligible = first_dose_eligible[:num_agents]
+
+            first_dose_eligible = first_dose_eligible[~np.in1d(first_dose_eligible, scheduled)]
+
+            if (len(first_dose_eligible)+len(scheduled)) > num_agents:
+                first_dose_inds = first_dose_eligible[:(num_agents - len(scheduled))]
+            else:
+                first_dose_inds = first_dose_eligible
+
+            if self.p['doses'] > 1:
+                self._scheduled_doses[sim.t+self.p.interval][tid].update(first_dose_inds)
+
+            vacc_inds.append(scheduled)
+            vacc_inds.append(first_dose_inds)
+
+        vacc_inds = np.concatenate(vacc_inds)
+        return vacc_inds
 
 
 #%% Prior/historical immunity interventions

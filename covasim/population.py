@@ -13,13 +13,14 @@ from . import data as cvdata
 from . import defaults as cvd
 from . import parameters as cvpar
 from . import people as cvppl
+from . import syn_matrix as cvs
+import time
 
 
 # Specify all externally visible functions this file defines
 __all__ = ['make_people', 'make_randpop', 'make_random_contacts',
            'make_microstructured_contacts', 'make_hybrid_contacts',
            'make_synthpop']
-
 
 def make_people(sim, popdict=None, save_pop=False, popfile=None, die=True, reset=False, verbose=None, **kwargs):
     '''
@@ -70,7 +71,7 @@ def make_people(sim, popdict=None, save_pop=False, popfile=None, die=True, reset
         sim.popdict = None # Once loaded, remove
     elif popdict is None: # Main use case: no popdict is supplied
         # Create the population
-        if pop_type in ['random', 'clustered', 'hybrid']:
+        if pop_type in ['random', 'hybrid', 'matrix']:
             popdict = make_randpop(sim, microstructure=pop_type, **kwargs)
         elif pop_type == 'synthpops':
             popdict = make_synthpop(sim, **kwargs)
@@ -78,7 +79,7 @@ def make_people(sim, popdict=None, save_pop=False, popfile=None, die=True, reset
             errormsg = 'You have set pop_type=None. This is fine, but you must ensure sim.popdict exists before calling make_people().'
             raise ValueError(errormsg)
         else: # pragma: no cover
-            errormsg = f'Population type "{pop_type}" not found; choices are random, clustered, hybrid, or synthpops'
+            errormsg = f'Population type "{pop_type}" not found; choices are random, hybrid, matrix, or synthpops'
             raise ValueError(errormsg)
 
     # Ensure prognoses are set
@@ -86,7 +87,7 @@ def make_people(sim, popdict=None, save_pop=False, popfile=None, die=True, reset
         sim['prognoses'] = cvpar.get_prognoses(sim['prog_by_age'], version=sim._default_ver)
 
     # Actually create the people
-    people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts']) # List for storing the people
+    people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts'], tile_uids=popdict.get('tile_uids'), tile_info=popdict.get('tile_info'), cmatrix=popdict.get('cmatrix'), ccfactor=popdict.get('comm_contact_factor')) # List for storing the people
 
     average_age = sum(popdict['age']/pop_size)
     sc.printv(f'Created {pop_size} people, average age {average_age:0.2f} years', 2, verbose)
@@ -177,15 +178,37 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
             contacts[lkey] = make_random_contacts(pop_size, n, **kwargs)
     elif microstructure == 'hybrid':
         contacts = make_hybrid_contacts(pop_size, ages, pars['contacts'], **kwargs)
+    elif microstructure == 'matrix':
+        contacts, tile_based_uids, tile_info, cmatrix, comm_contact_factor = cvs.Matrix.make_population(pars, pop_size, ages)
     else: # pragma: no cover
-        errormsg = f'Microstructure type "{microstructure}" not found; choices are random or hybrid'
+        errormsg = f'Microstructure type "{microstructure}" not found; choices are random, hybrid or matrix'
         raise NotImplementedError(errormsg)
 
     popdict['contacts']   = contacts
     popdict['layer_keys'] = list(pars['contacts'].keys())
 
+    if microstructure == 'matrix':
+        popdict['tile_uids'] = tile_based_uids
+        popdict['tile_info'] = tile_info
+        popdict['cmatrix'] = cmatrix
+        popdict['comm_contact_factor'] = comm_contact_factor
+
     return popdict
 
+def compare_contacts(pars, ages, contacts):
+    hm = np.genfromtxt(pars['home_matrix'], delimiter=' ')
+    cvs.Matrix.display_synthetic_contact_matrix(contacts['h'], ages, hm, 'home')
+
+    wm = np.genfromtxt(pars['work_matrix'], delimiter=' ')
+    cvs.Matrix.display_synthetic_contact_matrix(contacts['w'], ages, wm, 'work')
+
+    sm = np.genfromtxt(pars['school_matrix'], delimiter=' ')
+    cvs.Matrix.display_synthetic_contact_matrix(contacts['s'], ages, sm, 'school')
+
+    cm = np.genfromtxt(pars['community_matrix'], delimiter=',')
+    cvs.Matrix.display_synthetic_contact_matrix(contacts['c'], ages, cm, 'community')
+
+    raise Exception('break comparision')
 
 def _tidy_edgelist(p1, p2, mapping):
     ''' Helper function to convert lists to arrays and optionally map arrays '''

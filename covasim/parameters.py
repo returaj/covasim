@@ -55,6 +55,28 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     pars['dynam_layer']     = None  # Which layers are dynamic; set by reset_layer_pars() below
     pars['beta_layer']      = None  # Transmissibility per layer; set by reset_layer_pars() below
 
+    # Contact Matrix
+    pars['home_matrix']      = None
+    pars['school_matrix']    = None
+    pars['work_matrix']      = None
+    pars['community_matrix'] = None
+
+    # bing tiles
+    pars['tiles'] = None
+
+    # mobility parameter
+    pars['mobility'] = None
+    pars['contact_factor'] = 1.0
+
+    # population density
+    pars['pop_density'] = None
+
+    # initial infection rates
+    pars['init_infection'] = dict(tiles=None, ages=None) # eg: dict(tiles=[1/31]*31, ages=[1/16]*16)
+
+    # vaccine data
+    pars['vaccine_data'] = None
+
     # Basic disease transmission parameters
     pars['beta_dist']    = dict(dist='neg_binomial', par1=1.0, par2=0.45, step=0.01) # Distribution to draw individual level transmissibility; dispersion from https://www.researchsquare.com/article/rs-29548/v1
     pars['viral_dist']   = dict(frac_time=0.3, load_ratio=2, high_cap=4) # The time varying viral load (transmissibility); estimated from Lescure 2020, Lancet, https://doi.org/10.1016/S1473-3099(20)30200-0
@@ -187,6 +209,9 @@ def reset_layer_pars(pars, layer_keys=None, force=False):
         iso_factor  = dict(h=0.3, s=0.1, w=0.1, c=0.1),  # Multiply beta by this factor for people in isolation
         quar_factor = dict(h=0.6, s=0.2, w=0.2, c=0.2),  # Multiply beta by this factor for people in quarantine
     )
+
+    # Specify defaults for matrix -- household, school, work, and community layers (h, s, w, c)
+    layer_defaults['matrix'] = sc.dcp(layer_defaults['hybrid'])
 
     # Specify defaults for SynthPops -- same as hybrid except for LTCF layer (l)
     l_pars = dict(beta_layer=1.5, contacts=10, dynam_layer=0, iso_factor=0.2, quar_factor=0.3)

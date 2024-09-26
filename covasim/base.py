@@ -8,11 +8,14 @@ import numpy as np
 import pandas as pd
 import sciris as sc
 import datetime as dt
+from os.path import join
 from . import version as cvv
 from . import utils as cvu
 from . import misc as cvm
 from . import defaults as cvd
 from . import parameters as cvpar
+from . import syn_matrix as cvs
+
 
 # Specify all externally visible classes this file defines
 __all__ = ['ParsObj', 'Result', 'BaseSim', 'BasePeople', 'Person', 'FlexDict', 'Contacts', 'Layer']
@@ -1616,6 +1619,28 @@ class Layer(FlexDict):
         return output
 
 
+    def append_tile_based(self, tile_pos, contacts):
+        for key in self.keys():
+            new_contacts = contacts[key]
+            n_new = len(new_contacts)
+            n_curr = len(self[key])
+            n_total = n_new + n_curr
+            new_arr = np.zeros(n_total, dtype=self.meta.get(key))
+            n, c = 0, 0
+            for i in range(n_total):
+                till = tile_pos + n_new
+                if i>= tile_pos and i < till:
+                    new_arr[i] = new_contacts[n]
+                    n += 1
+                elif c < n_curr:
+                    new_arr[i] = self[key][c]
+                    c += 1
+                else:
+                    raise Exception(f"where did you come from ?? {i} {tile_pos} {till} {n} {c}")
+            self[key] = new_arr
+        return
+
+
     def append(self, contacts):
         '''
         Append contacts to the current layer.
@@ -1708,7 +1733,7 @@ class Layer(FlexDict):
         return contact_inds
 
 
-    def update(self, people, frac=1.0):
+    def update(self, people, date=None, frac=1.0):
         '''
         Regenerate contacts on each timestep.
 
@@ -1725,15 +1750,58 @@ class Layer(FlexDict):
             people (People): the Covasim People object, which is usually used to make new contacts
             frac (float): the fraction of contacts to update on each timestep
         '''
-        # Choose how many contacts to make
-        pop_size   = len(people) # Total number of people
-        n_contacts = len(self) # Total number of contacts
-        n_new = int(np.round(n_contacts*frac)) # Since these get looped over in both directions later
-        inds = cvu.choose(n_contacts, n_new)
 
-        # Create the contacts, not skipping self-connections
-        self['p1'][inds]   = np.array(cvu.choose_r(max_n=pop_size, n=n_new), dtype=cvd.default_int) # Choose with replacement
-        self['p2'][inds]   = np.array(cvu.choose_r(max_n=pop_size, n=n_new), dtype=cvd.default_int)
-        self['beta'][inds] = np.ones(n_new, dtype=cvd.default_float)
+        if people.pars['pop_type'] == 'matrix':
+            if date != None:
+                path = join(people.pars['mobility'], f"{date.strftime('%Y-%m-%d')}.csv")
+                mobility = np.genfromtxt(path, delimiter=',')
+            else:
+                mobility = np.genfromtxt(people.pars['mobility'], delimiter=',')
+            comm_contact = cvs.Matrix.get_community_contact(people.tile_uids, mobility, people.cmatrix, people.ccfactor)
+            self['p1'], self['p2'] = comm_contact['p1'], comm_contact['p2']
+            self['beta'] = np.ones(len(self), dtype=cvd.default_float)
+        else:
+            # Choose how many contacts to make
+            pop_size   = len(people) # Total number of people
+            n_contacts = len(self) # Total number of contacts
+            n_new = int(np.round(n_contacts*frac)) # Since these get looped over in both directions later
+            inds = cvu.choose(n_contacts, n_new)
+
+            # Create the contacts, not skipping self-connections
+            self['p1'][inds]   = np.array(cvu.choose_r(max_n=pop_size, n=n_new), dtype=cvd.default_int) # Choose with replacement
+            self['p2'][inds]   = np.array(cvu.choose_r(max_n=pop_size, n=n_new), dtype=cvd.default_int)
+            self['beta'][inds] = np.ones(n_new, dtype=cvd.default_float)
         return
 
+
+class TileInfo(FlexDict):
+    def __init__(self, layer_keys=None):
+        if layer_keys is not None:
+            for lkey in layer_keys:
+                self[lkey] = []
+        return
+
+    def append(self, val, lkey):
+        if lkey not in self.keys():
+            self[lkey] = []
+        self[lkey].append(val)
+        return
+
+    def set_key(self, val, lkey):
+        self[lkey] = sc.promotetolist(val)
+
+    def size(self, indx, lkey):
+        start_id = (0 if indx == 0 else self[lkey][indx-1])
+        size = self[lkey][indx] - start_id
+        return size
+
+    def sample_ids(self, n_samples, indx, lkey):
+        start_id = (0 if indx == 0 else self[lkey][indx-1])
+        size = self.size(indx, lkey)
+        ids = cvu.choose(size, n_samples) + start_id
+        return ids
+
+    def update_indx(self, val, indx, lkey):
+        for i in range(indx, len(self[lkey])):
+            self[lkey][i] += val
+        return

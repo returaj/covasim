@@ -6,6 +6,7 @@ Defines the Sim class, Covasim's core class.
 import numpy as np
 import pandas as pd
 import sciris as sc
+from collections import Counter
 from . import utils as cvu
 from . import misc as cvm
 from . import base as cvb
@@ -244,7 +245,7 @@ class Sim(cvb.BaseSim):
                 raise ValueError(errormsg)
 
         # Handle population data
-        popdata_choices = ['random', 'hybrid', 'clustered', 'synthpops']
+        popdata_choices = ['random', 'hybrid', 'matrix', 'synthpops']
         choice = self['pop_type']
         if choice and choice not in popdata_choices: # pragma: no cover
             choicestr = ', '.join(popdata_choices)
@@ -442,7 +443,27 @@ class Sim(cvb.BaseSim):
 
         # Create the seed infections
         if self['pop_infected']:
-            inds = cvu.choose(self['pop_size'], self['pop_infected'])
+            if self['pop_type'] == 'matrix':
+                init_infection = self['init_infection']
+                tile_prob, age_prob = init_infection.get('tiles'), init_infection.get('ages')
+                tile_uids = self.people['tile_uids']
+                if tile_prob is None:
+                    tile_prob = [1/len(tile_uids)] * len(tile_uids)
+                if age_prob is None:
+                    age_prob = [1/len(tile_uids[0])] * len(tile_uids[0])
+                num_tiles, num_ages = len(tile_prob), len(age_prob)
+                assert num_tiles == len(tile_uids)
+                assert num_ages == len(tile_uids[0])
+                pop_infected = self['pop_infected']
+                inds = []
+                for tid in range(num_tiles):
+                    pop = int(pop_infected * tile_prob[tid]) + 1
+                    age_sample = Counter(np.random.choice(num_ages, pop, p=age_prob))
+                    for age, cnt in age_sample.items():
+                        inds.append(tile_uids[tid][age][:cnt])
+                inds = np.concatenate(inds)
+            else:
+                inds = cvu.choose(self['pop_size'], self['pop_infected'])
             self.people.infect(inds=inds, layer='seed_infection') # Not counted by results since flows are re-initialized during the step
 
         return
@@ -570,7 +591,7 @@ class Sim(cvb.BaseSim):
         self.rescale() # Check if we need to rescale
         people   = self.people # Shorten this for later use
         people.update_states_pre(t=t) # Update the state of everyone and count the flows
-        contacts = people.update_contacts() # Compute new contacts
+        contacts = people.update_contacts(date=self.datevec[self.t]) # Compute new contacts
         hosp_max = people.count('severe')   > self['n_beds_hosp'] if self['n_beds_hosp'] is not None else False # Check for acute bed constraint
         icu_max  = people.count('critical') > self['n_beds_icu']  if self['n_beds_icu']  is not None else False # Check for ICU bed constraint
 
